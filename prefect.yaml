@@ -1,0 +1,11 @@
+name: meteo
+prefect-version: 3.0.0
+
+deployments:
+  - name: meteo-every-10min
+    entrypoint: src/meteo/flows/ingest.py:meteo_micro_batch_flow
+    work_pool:
+      name: default-agent-pool
+    schedules:
+      - cron: "*/10 * * * *"
+        timezone: UTC
