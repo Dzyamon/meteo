@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     locations_config: Path = Path("config/locations.yaml")
     ingest_lookback_hours: int = 48
     forecast_hours: int = 6
+    kafka_bootstrap_servers: str = "localhost:19092"
+    kafka_topic_observations: str = "weather.observations"
+    kafka_consumer_group: str = "meteo-stream-consumer"
+    producer_poll_interval_seconds: int = 600
 
 
 @lru_cache

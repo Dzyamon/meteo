@@ -1,7 +1,7 @@
 [project]
 name = "meteo"
 version = "0.1.0"
-description = "Micro-batch weather nowcasting pipeline (Approach 1 MVP)"
+description = "Weather nowcasting pipelines: micro-batch (Approach 1) and streaming (Approach 2)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -17,6 +17,7 @@ dependencies = [
     "lightgbm>=4.5",
     "scikit-learn>=1.5",
     "joblib>=1.4",
+    "kafka-python>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -25,6 +26,8 @@ dev = ["pytest>=8.0", "ruff>=0.8"]
 [project.scripts]
 meteo-ingest = "meteo.flows.ingest:run_once"
 meteo-serve = "meteo.api.main:serve"
+meteo-stream-producer = "meteo_stream.producer:main"
+meteo-stream-consumer = "meteo_stream.consumer:main"
 
 [build-system]
 requires = ["setuptools>=75"]
