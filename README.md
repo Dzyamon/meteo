@@ -137,7 +137,7 @@ src/meteo/
 
 ## Environment variables
 
-See `.env.example`. Key settings:
+See `.env`. Key settings:
 
 - `USE_LOCAL_BRONZE=true` — skip MinIO, write to disk (simplest local dev)
 - `INGEST_LOOKBACK_HOURS` — history window for features (default 48)

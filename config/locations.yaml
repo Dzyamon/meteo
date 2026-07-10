@@ -1,13 +1,7 @@
 # Add your target locations here.
 locations:
-  - id: vilnius
-    name: Vilnius
-    latitude: 54.6872
-    longitude: 25.2797
-    timezone: Europe/Vilnius
-
-  - id: kaunas
-    name: Kaunas
-    latitude: 54.8985
-    longitude: 23.9036
-    timezone: Europe/Vilnius
+  - id: minsk
+    name: Minsk
+    latitude: 53.9006
+    longitude: 27.5590
+    timezone: Europe/Minsk
