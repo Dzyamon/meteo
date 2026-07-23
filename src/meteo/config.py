@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     nwp_forecast_hours: int = 48
     model_dir: Path = Path("./models")
     bias_correction_min_samples: int = 300
+    validation_holdout_fraction: float = 0.2  # most-recent share held out for out-of-sample MAE
     # AI model comparison (Open-Meteo-served ECMWF AIFS)
     aifs_openmeteo_model: str = "ecmwf_aifs025_single"
     aifs_model_name: str = "aifs"
