@@ -46,6 +46,28 @@ SELECT create_hypertable('features', 'time', if_not_exists => TRUE);
 CREATE INDEX IF NOT EXISTS idx_features_location_time
     ON features (location_id, time DESC);
 
+-- Approach 3 (model-centric): raw NWP forecasts extracted at each location's grid cell
+CREATE TABLE IF NOT EXISTS nwp_forecasts (
+    run_time        TIMESTAMPTZ NOT NULL,   -- model cycle (e.g. GFS 00/06/12/18Z)
+    valid_time      TIMESTAMPTZ NOT NULL,   -- time the forecast is valid for
+    location_id     TEXT        NOT NULL,
+    model           TEXT        NOT NULL,   -- 'gfs'
+    horizon_hours   SMALLINT    NOT NULL,
+    temperature_c   DOUBLE PRECISION,
+    precipitation_mm DOUBLE PRECISION,
+    wind_speed_ms   DOUBLE PRECISION,
+    wind_direction_deg DOUBLE PRECISION,
+    humidity_pct    DOUBLE PRECISION,
+    pressure_hpa    DOUBLE PRECISION,
+    cloud_cover_pct DOUBLE PRECISION,
+    PRIMARY KEY (run_time, valid_time, location_id, model)
+);
+
+SELECT create_hypertable('nwp_forecasts', 'run_time', if_not_exists => TRUE);
+
+CREATE INDEX IF NOT EXISTS idx_nwp_location_valid
+    ON nwp_forecasts (location_id, model, valid_time DESC);
+
 -- Predictions served by the API
 CREATE TABLE IF NOT EXISTS predictions (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -56,7 +78,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     precipitation_mm DOUBLE PRECISION,
     wind_speed_ms   DOUBLE PRECISION,
     model_version   TEXT        NOT NULL DEFAULT 'baseline',
-    PRIMARY KEY (created_at, location_id, horizon_hours)
+    PRIMARY KEY (created_at, location_id, horizon_hours, model_version)
 );
 
 SELECT create_hypertable('predictions', 'created_at', if_not_exists => TRUE);

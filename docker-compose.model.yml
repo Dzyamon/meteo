@@ -1,0 +1,37 @@
+# Approach 3 overlay (model-centric) — use with:
+#   docker compose -f docker-compose.yml -f docker-compose.model.yml up -d --build
+#
+# Fetch/decode GFS GRIB runs inside this Linux container so the Windows host
+# never needs eccodes. Bronze is written to ./data; trained bias models to
+# ./models (both bind-mounted so they persist and are visible on the host).
+
+services:
+  meteo-model:
+    build:
+      context: .
+      dockerfile: Dockerfile.model
+    container_name: meteo-model
+    environment:
+      DATABASE_URL: postgresql://meteo:meteo@timescaledb:5432/meteo
+      USE_LOCAL_BRONZE: "true"
+      LOCAL_BRONZE_PATH: /app/data/bronze
+      MODEL_DIR: /app/models
+      NWP_FORECAST_HOURS: "48"
+      MODEL_FETCH_INTERVAL: "3600"
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./config:/app/config:ro
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    # Fetch the latest GFS run, apply correction, then wait; GFS publishes a new
+    # cycle every 6h so an hourly loop keeps the newest run's horizons fresh.
+    command:
+      - /bin/sh
+      - -c
+      - |
+        while true; do
+          meteo-model-fetch || echo "gfs fetch cycle failed";
+          sleep "$${MODEL_FETCH_INTERVAL:-3600}";
+        done

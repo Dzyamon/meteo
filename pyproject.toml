@@ -22,6 +22,16 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.8"]
+# Approach 3 (model-centric): GFS GRIB ingestion + local bias correction.
+# eccodes needs a native library; on Windows the ecmwflibs wheel bundles it.
+# Recommended: run these steps in the Linux meteo-model container (docker-compose.model.yml).
+model = [
+    "xarray>=2024.6",
+    "cfgrib>=0.9.12",
+    "eccodes>=2.38",
+    "ecmwflibs>=0.6; sys_platform == 'win32'",
+    "herbie-data>=2024.8",
+]
 
 [project.scripts]
 meteo-ingest = "meteo.flows.ingest:run_once"
@@ -29,6 +39,8 @@ meteo-serve = "meteo.api.main:serve"
 meteo-stream-producer = "meteo_stream.producer:main"
 meteo-stream-consumer = "meteo_stream.consumer:main"
 meteo-stream-alerter = "meteo_stream.alerter:main"
+meteo-model-fetch = "meteo_model.flows:run_once"
+meteo-model-train = "meteo_model.correct.train:main"
 
 [build-system]
 requires = ["setuptools>=75"]

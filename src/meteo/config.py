@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     alerts_config: Path = Path("config/alerts.yaml")
     alert_cooldown_seconds: int = 1800
     alert_webhook_url: str = ""
+    # Approach 3 (model-centric)
+    gfs_s3_bucket: str = "noaa-gfs-bdp-pds"
+    gfs_model: str = "gfs"
+    nwp_forecast_hours: int = 48
+    model_dir: Path = Path("./models")
+    bias_correction_min_samples: int = 300
 
 
 @lru_cache

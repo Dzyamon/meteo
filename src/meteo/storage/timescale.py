@@ -146,17 +146,28 @@ class TimescaleStore:
                 cur.execute(sql, (location_id,))
                 return cur.fetchone()
 
-    def latest_predictions(self, location_id: str) -> list[dict]:
-        sql = """
-            SELECT DISTINCT ON (horizon_hours)
-                valid_time, horizon_hours, temperature_c, precipitation_mm, wind_speed_ms, model_version, created_at
-            FROM predictions
-            WHERE location_id = %s
-            ORDER BY horizon_hours, created_at DESC
-        """
+    def latest_predictions(self, location_id: str, model_version: str | None = None) -> list[dict]:
+        if model_version:
+            sql = """
+                SELECT DISTINCT ON (horizon_hours)
+                    valid_time, horizon_hours, temperature_c, precipitation_mm, wind_speed_ms, model_version, created_at
+                FROM predictions
+                WHERE location_id = %s AND model_version = %s
+                ORDER BY horizon_hours, created_at DESC
+            """
+            params = (location_id, model_version)
+        else:
+            sql = """
+                SELECT DISTINCT ON (horizon_hours)
+                    valid_time, horizon_hours, temperature_c, precipitation_mm, wind_speed_ms, model_version, created_at
+                FROM predictions
+                WHERE location_id = %s
+                ORDER BY horizon_hours, created_at DESC
+            """
+            params = (location_id,)
         with self.connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (location_id,))
+                cur.execute(sql, params)
                 return cur.fetchall()
 
     def save_alert(self, row: dict) -> None:
@@ -214,6 +225,81 @@ class TimescaleStore:
         with self.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, params)
+                return cur.fetchall()
+
+    def upsert_nwp_forecasts(self, rows: list[dict]) -> int:
+        if not rows:
+            return 0
+        sql = """
+            INSERT INTO nwp_forecasts (
+                run_time, valid_time, location_id, model, horizon_hours,
+                temperature_c, precipitation_mm, wind_speed_ms, wind_direction_deg,
+                humidity_pct, pressure_hpa, cloud_cover_pct
+            ) VALUES (
+                %(run_time)s, %(valid_time)s, %(location_id)s, %(model)s, %(horizon_hours)s,
+                %(temperature_c)s, %(precipitation_mm)s, %(wind_speed_ms)s, %(wind_direction_deg)s,
+                %(humidity_pct)s, %(pressure_hpa)s, %(cloud_cover_pct)s
+            )
+            ON CONFLICT (run_time, valid_time, location_id, model) DO UPDATE SET
+                horizon_hours = EXCLUDED.horizon_hours,
+                temperature_c = EXCLUDED.temperature_c,
+                precipitation_mm = EXCLUDED.precipitation_mm,
+                wind_speed_ms = EXCLUDED.wind_speed_ms,
+                wind_direction_deg = EXCLUDED.wind_direction_deg,
+                humidity_pct = EXCLUDED.humidity_pct,
+                pressure_hpa = EXCLUDED.pressure_hpa,
+                cloud_cover_pct = EXCLUDED.cloud_cover_pct
+        """
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(sql, rows)
+            conn.commit()
+        return len(rows)
+
+    def fetch_nwp_training_pairs(self, location_id: str, model: str) -> list[dict]:
+        """
+        Join each NWP forecast to the observation that actually occurred at its
+        valid_time, so a bias-correction model can learn (forecast -> residual).
+        """
+        sql = """
+            SELECT
+                f.valid_time, f.horizon_hours,
+                f.temperature_c   AS nwp_temperature_c,
+                f.precipitation_mm AS nwp_precipitation_mm,
+                f.wind_speed_ms   AS nwp_wind_speed_ms,
+                f.humidity_pct    AS nwp_humidity_pct,
+                f.pressure_hpa    AS nwp_pressure_hpa,
+                o.temperature_c   AS obs_temperature_c,
+                o.precipitation_mm AS obs_precipitation_mm,
+                o.wind_speed_ms   AS obs_wind_speed_ms
+            FROM nwp_forecasts f
+            JOIN observations o
+              ON o.location_id = f.location_id
+             AND o.source = 'open_meteo'
+             AND o.time = f.valid_time
+            WHERE f.location_id = %s AND f.model = %s
+            ORDER BY f.valid_time
+        """
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (location_id, model))
+                return cur.fetchall()
+
+    def fetch_latest_nwp_forecast(self, location_id: str, model: str) -> list[dict]:
+        """Return every horizon of the most recent model run for a location."""
+        sql = """
+            SELECT *
+            FROM nwp_forecasts
+            WHERE location_id = %s AND model = %s
+              AND run_time = (
+                  SELECT MAX(run_time) FROM nwp_forecasts
+                  WHERE location_id = %s AND model = %s
+              )
+            ORDER BY horizon_hours
+        """
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (location_id, model, location_id, model))
                 return cur.fetchall()
 
     def close(self) -> None:

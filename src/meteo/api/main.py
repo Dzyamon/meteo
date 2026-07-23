@@ -19,17 +19,49 @@ def list_locations() -> list[dict]:
 
 
 @app.get("/predict/{location_id}")
-def get_predictions(location_id: str) -> dict:
+def get_predictions(location_id: str, model_version: str | None = None) -> dict:
     db = TimescaleStore()
     try:
         features = db.latest_features(location_id)
-        predictions = db.latest_predictions(location_id)
+        predictions = db.latest_predictions(location_id, model_version=model_version)
         if not predictions:
             raise HTTPException(status_code=404, detail=f"No predictions for {location_id}")
         return {
             "location_id": location_id,
+            "model_version": model_version,
             "features_as_of": features["time"] if features else None,
             "predictions": predictions,
+        }
+    finally:
+        db.close()
+
+
+@app.get("/forecast/{location_id}")
+def get_model_forecast(location_id: str) -> dict:
+    """Approach 3: raw GFS vs. locally bias-corrected forecast, side by side."""
+    db = TimescaleStore()
+    try:
+        raw = db.latest_predictions(location_id, model_version="gfs_raw")
+        corrected = db.latest_predictions(location_id, model_version="gfs_corrected")
+        if not raw and not corrected:
+            raise HTTPException(status_code=404, detail=f"No model forecast for {location_id}")
+
+        # Correction is active only if a corrected value actually diverges from
+        # raw for some horizon (compare forecast values, not row metadata).
+        def _values(rows: list[dict]) -> dict:
+            return {
+                r["horizon_hours"]: (r["temperature_c"], r["precipitation_mm"], r["wind_speed_ms"])
+                for r in rows
+            }
+
+        raw_v, corrected_v = _values(raw), _values(corrected)
+        correction_active = any(raw_v.get(h) != v for h, v in corrected_v.items())
+
+        return {
+            "location_id": location_id,
+            "gfs_raw": raw,
+            "gfs_corrected": corrected,
+            "correction_active": correction_active,
         }
     finally:
         db.close()

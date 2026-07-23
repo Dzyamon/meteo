@@ -293,6 +293,85 @@ Open-Meteo
 
 
 
+## Approach 3: Model-centric (feature/model-centric branch)
+
+Pull **gridded NWP output** (NOAA GFS 0.25°) instead of point forecasts, extract the grid cell over each location, then **beat raw GFS with local bias correction** — a LightGBM model trained on the observations Approach 1/2 already collected. Reuses `config`, `BronzeStore`, `TimescaleStore`, `build_feature_rows`, the `predictions` table (via `model_version`), and the FastAPI app.
+
+Everything is free and needs no GPU. GFS comes from AWS Open Data (`noaa-gfs-bdp-pds`, no auth) via [Herbie](https://herbie.readthedocs.io) byte-range subsetting, so each cycle downloads KBs, not the full ~400 MB GRIB.
+
+### Architecture
+
+```
+NOAA GFS 0.25° GRIB2 (AWS Open Data, anonymous)
+    │  fetch latest run (00/06/12/18Z), byte-range subset
+    ▼
+ extract nearest grid cell per location
+    │
+ Bronze (raw values) ──► nwp_forecasts (raw GFS per run/valid_time/horizon)
+    │                              │
+    │        observations + features (already collected by Approach 1/2)
+    │                              │
+    ▼                              ▼
+ LightGBM bias correction (residual = observed − GFS, per target)
+    │
+ predictions (model_version = 'gfs_raw' & 'gfs_corrected')
+    │
+ FastAPI  GET /forecast/{location_id}   (raw vs corrected side by side)
+```
+
+### 1. Start infrastructure (base + model runner)
+
+GRIB decoding (`eccodes`/`cfgrib`) runs inside a Linux container, so the Windows host never needs the native library:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.model.yml up -d --build
+```
+
+The `meteo-model` service fetches the latest GFS run, stores it, and applies bias correction every hour (`MODEL_FETCH_INTERVAL`). Bronze → `./data`, trained models → `./models` (bind-mounted).
+
+For existing databases created before this feature, run:
+
+```powershell
+Get-Content scripts/migrate_nwp.sql | docker exec -i meteo-timescaledb-1 psql -U meteo -d meteo
+```
+
+### 2. Run manually (optional)
+
+One fetch+correct cycle on demand (needs `pip install -e ".[model]"` locally, or run in the container):
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.model.yml run --rm meteo-model meteo-model-fetch
+```
+
+### 3. Train the bias-correction models
+
+Correction is a **cold start**: until `BIAS_CORRECTION_MIN_SAMPLES` matched (GFS forecast, observation) pairs exist, `gfs_corrected` passes raw GFS through unchanged. Keep Approach 1 **or** 2 running to accumulate observations, then:
+
+```powershell
+# LightGBM (already a core dependency) needs no GRIB tooling, so training runs on the host too
+meteo-model-train
+```
+
+Models are saved per location + target to `./models/<location_id>/gfs_correction_<target>.pkl`. Re-run periodically as data grows.
+
+### 4. Serve
+
+```powershell
+meteo-serve
+Invoke-RestMethod http://localhost:8000/forecast/minsk       # raw vs corrected
+Invoke-RestMethod http://localhost:8000/predict/minsk?model_version=gfs_corrected
+```
+
+### Approaches 1/2 vs 3
+
+|               | Approach 1/2                     | Approach 3                                      |
+| ------------- | -------------------------------- | ----------------------------------------------- |
+| Source        | Open-Meteo point forecast (JSON) | GFS gridded model output (GRIB2)                 |
+| Prediction    | forecast passthrough (baseline)  | GFS + trained local bias correction             |
+| Entrypoints   | `meteo-ingest` / stream-\*       | `meteo-model-fetch`, `meteo-model-train`        |
+| Serving       | `/predict`                       | `/forecast` (+ `/predict?model_version=`)       |
+| Run together? | pick one ingest path             | complementary — needs 1/2's observations to train |
+
 ## Next steps (ML training)
 
 Once you have ~2–4 weeks of hourly data in `observations`:
@@ -329,6 +408,15 @@ src/meteo_stream/          # Approach 2 — streaming
   kafka_client.py          # producer/consumer factories
 config/alerts.yaml         # alert thresholds
 grafana/                   # live dashboard + TimescaleDB datasource
+src/meteo_model/           # Approach 3 — model-centric
+  sources/gfs.py           # GFS GRIB fetch (Herbie) + nearest grid cell
+  extract.py               # unit/wind conversions (pure, testable)
+  correct/dataset.py       # join nwp<->obs -> residual training frame
+  correct/train.py         # LightGBM bias models per location/target
+  correct/predict.py       # apply correction -> gfs_raw + gfs_corrected
+  pipeline.py / flows.py   # one fetch+correct cycle (Prefect-wrapped)
+docker-compose.model.yml   # GFS runner overlay (Approach 3)
+Dockerfile.model           # Linux image with eccodes for GRIB decoding
 ```
 
 
