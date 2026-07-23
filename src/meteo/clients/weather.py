@@ -49,6 +49,7 @@ class OpenMeteoClient:
             "longitude": location.longitude,
             "timezone": location.timezone,
             "hourly": ",".join(self.HOURLY_VARS),
+            "windspeed_unit": "ms",  # Open-Meteo defaults to km/h; our column is wind_speed_ms
             "past_hours": lookback_hours,
             "forecast_hours": 1,
         }
@@ -64,6 +65,7 @@ class OpenMeteoClient:
             "longitude": location.longitude,
             "timezone": location.timezone,
             "hourly": ",".join(self.HOURLY_VARS),
+            "windspeed_unit": "ms",  # Open-Meteo defaults to km/h; our column is wind_speed_ms
             "forecast_hours": forecast_hours,
         }
         response = self._client.get(self.FORECAST_URL, params=params)
