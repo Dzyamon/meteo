@@ -42,6 +42,7 @@ meteo-stream-alerter = "meteo_stream.alerter:main"
 meteo-model-fetch = "meteo_model.flows:run_once"
 meteo-model-train = "meteo_model.correct.train:main"
 meteo-model-predict = "meteo_model.correct.predict:main"
+meteo-ai-fetch = "meteo_model.ai_pipeline:main"
 
 [build-system]
 requires = ["setuptools>=75"]

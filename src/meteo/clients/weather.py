@@ -98,6 +98,25 @@ class OpenMeteoClient:
         rows = self._parse_hourly(payload, location.id, "open_meteo")
         return payload, rows
 
+    def fetch_model_forecast(self, location: Location, model: str, forecast_hours: int = 48) -> dict:
+        """Raw hourly forecast from a specific Open-Meteo model (e.g. 'ecmwf_aifs025_single').
+
+        Returns the payload; times are UTC. Used to pull AI/physics model forecasts
+        as additional model_versions for comparison.
+        """
+        params = {
+            "latitude": location.latitude,
+            "longitude": location.longitude,
+            "timezone": "UTC",
+            "hourly": ",".join(self.HOURLY_VARS),
+            "windspeed_unit": "ms",
+            "models": model,
+            "forecast_hours": forecast_hours,
+        }
+        response = self._client.get(self.FORECAST_URL, params=params)
+        response.raise_for_status()
+        return response.json()
+
     def _parse_hourly(self, payload: dict, location_id: str, source: str) -> list[ObservationRow]:
         hourly = payload["hourly"]
         times = hourly["time"]
