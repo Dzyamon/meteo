@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 
+from meteo.config import load_locations
 from meteo.storage.timescale import TimescaleStore
 from meteo_model.correct.dataset import feature_vector
 from meteo_model.correct.storage import load_model
@@ -98,3 +99,22 @@ def predict_location(location_id: str, db: TimescaleStore) -> dict:
         "corrected": corrected_n,
         "correction_active": corrected_active,
     }
+
+
+def predict_all() -> list[dict]:
+    """Re-correct the latest stored NWP forecast for every location (no re-fetch)."""
+    db = TimescaleStore()
+    try:
+        return [predict_location(loc.id, db) for loc in load_locations()]
+    finally:
+        db.close()
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    results = predict_all()
+    logger.info("Prediction complete: %s", results)
+
+
+if __name__ == "__main__":
+    main()
