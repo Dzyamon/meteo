@@ -360,7 +360,19 @@ Models are saved per location + target to `./models/<location_id>/gfs_correction
 meteo-serve
 Invoke-RestMethod http://localhost:8000/forecast/minsk       # raw vs corrected
 Invoke-RestMethod http://localhost:8000/predict/minsk?model_version=gfs_corrected
+Invoke-RestMethod "http://localhost:8000/eval/minsk?hours=240" # fair per-model accuracy
 ```
+
+### 5. Compare against an AI model (ECMWF AIFS)
+
+Pull ECMWF's AIFS AI model (served free by Open-Meteo) as another `model_version` — no GPU, no GRIB, host-runnable:
+
+```powershell
+meteo-ai-fetch                                # -> nwp_forecasts(aifs) + predictions(aifs_raw)
+Invoke-RestMethod "http://localhost:8000/eval/minsk"   # aifs_raw vs gfs_raw vs gfs_corrected vs baseline
+```
+
+`GET /eval/{location}?hours=` scores the **latest forecast per (model, valid_time)** against observations (MAE / RMSE / signed bias per variable), so short-lead re-forecasts don't distort the ranking. This turns the shared `model_version` schema into a real multi-model benchmark: physics (GFS) vs AI (AIFS) vs locally-corrected vs Open-Meteo blend.
 
 ### Approaches 1/2 vs 3
 

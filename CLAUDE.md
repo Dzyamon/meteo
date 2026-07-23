@@ -35,7 +35,11 @@ meteo-stream-consumer    # Approach 2: Kafka → observations + features
 meteo-stream-alerter     # Approach 2: Kafka → evaluate rules → alerts table + weather.alerts
 meteo-model-fetch        # Approach 3: fetch GFS → nwp_forecasts → correct → predictions (needs [model] extra / container)
 meteo-model-train        # Approach 3: train LightGBM bias models from nwp↔obs pairs (host-runnable, no GRIB deps)
+meteo-model-predict      # Approach 3: re-apply correction to latest forecast without re-fetching (host-runnable)
+meteo-ai-fetch           # Approach 3: pull ECMWF AIFS (via Open-Meteo API) as model_version aifs_raw (host, no GRIB)
 ```
+
+Scripts for bootstrapping training history: `scripts/backfill_observations.py` (host, Open-Meteo archive) and `scripts/backfill_gfs.py` (container). Multi-model accuracy benchmark: `GET /eval/{location}?hours=` scores the latest forecast per (model_version, valid_time) against observations (MAE/RMSE/bias) — the fair way to compare gfs_raw / gfs_corrected / aifs_raw / open_meteo_baseline.
 
 Approach 3 GRIB decoding (`eccodes`/`cfgrib`) runs in a Linux container to avoid Windows eccodes pain:
 

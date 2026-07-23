@@ -302,5 +302,54 @@ class TimescaleStore:
                 cur.execute(sql, (location_id, model, location_id, model))
                 return cur.fetchall()
 
+    def evaluate_models(
+        self,
+        location_id: str,
+        since_hours: int = 168,
+        source: str = "open_meteo",
+    ) -> list[dict]:
+        """Per-model forecast error vs observations, fairly scored.
+
+        Uses the most recent forecast per (model_version, valid_time) so a model
+        isn't rewarded for re-forecasting the same hour at shorter lead time.
+        """
+        sql = """
+            WITH latest AS (
+                SELECT DISTINCT ON (model_version, valid_time)
+                    model_version, valid_time,
+                    temperature_c, precipitation_mm, wind_speed_ms
+                FROM predictions
+                WHERE location_id = %(loc)s
+                  AND valid_time >= NOW() - (%(hours)s * INTERVAL '1 hour')
+                ORDER BY model_version, valid_time, created_at DESC
+            )
+            SELECT
+                l.model_version,
+                COUNT(*) AS scored,
+                AVG(ABS(l.temperature_c - o.temperature_c)) AS temp_mae,
+                SQRT(AVG(POWER(l.temperature_c - o.temperature_c, 2))) AS temp_rmse,
+                AVG(l.temperature_c - o.temperature_c) AS temp_bias,
+                COUNT(*) FILTER (
+                    WHERE l.temperature_c IS NOT NULL AND o.temperature_c IS NOT NULL
+                ) AS temp_n,
+                AVG(ABS(l.wind_speed_ms - o.wind_speed_ms)) AS wind_mae,
+                COUNT(*) FILTER (
+                    WHERE l.wind_speed_ms IS NOT NULL AND o.wind_speed_ms IS NOT NULL
+                ) AS wind_n,
+                AVG(ABS(l.precipitation_mm - o.precipitation_mm)) AS precip_mae,
+                COUNT(*) FILTER (
+                    WHERE l.precipitation_mm IS NOT NULL AND o.precipitation_mm IS NOT NULL
+                ) AS precip_n
+            FROM latest l
+            JOIN observations o
+              ON o.location_id = %(loc)s AND o.source = %(source)s AND o.time = l.valid_time
+            GROUP BY l.model_version
+            ORDER BY temp_mae NULLS LAST
+        """
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {"loc": location_id, "hours": since_hours, "source": source})
+                return cur.fetchall()
+
     def close(self) -> None:
         self._pool.close()

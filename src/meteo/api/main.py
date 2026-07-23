@@ -76,6 +76,51 @@ def list_alerts(location_id: str | None = None, limit: int = 50) -> list[dict]:
         db.close()
 
 
+def _round(value, ndigits: int = 3):
+    return None if value is None else round(float(value), ndigits)
+
+
+@app.get("/eval/{location_id}")
+def evaluate(location_id: str, hours: int = 168) -> dict:
+    """Fair per-model forecast accuracy vs observations over the last `hours`.
+
+    Scores the latest forecast per (model_version, valid_time) so short-lead
+    re-forecasts don't distort the comparison. Lower MAE/RMSE is better; bias is
+    signed mean error (forecast − observed).
+    """
+    db = TimescaleStore()
+    try:
+        rows = db.evaluate_models(location_id, since_hours=hours)
+        if not rows:
+            raise HTTPException(status_code=404, detail=f"No scored forecasts for {location_id}")
+        models = [
+            {
+                "model_version": r["model_version"],
+                "scored": r["scored"],
+                "temperature": {
+                    "mae": _round(r["temp_mae"]),
+                    "rmse": _round(r["temp_rmse"]),
+                    "bias": _round(r["temp_bias"]),
+                    "n": r["temp_n"],
+                },
+                "wind_speed": {"mae": _round(r["wind_mae"]), "n": r["wind_n"]},
+                "precipitation": {"mae": _round(r["precip_mae"]), "n": r["precip_n"]},
+            }
+            for r in rows
+        ]
+        ranked = [m for m in models if m["temperature"]["mae"] is not None]
+        best = ranked[0]["model_version"] if ranked else None
+        return {
+            "location_id": location_id,
+            "window_hours": hours,
+            "scored_against": "observations (open_meteo)",
+            "best_temperature_mae": best,
+            "models": models,
+        }
+    finally:
+        db.close()
+
+
 @app.get("/observations/{location_id}/latest")
 def latest_observation(location_id: str) -> dict:
     db = TimescaleStore()
