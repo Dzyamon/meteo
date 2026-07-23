@@ -19,12 +19,12 @@ def create_producer() -> KafkaProducer:
     )
 
 
-def create_consumer() -> KafkaConsumer:
+def create_consumer(group_id: str | None = None, topic: str | None = None) -> KafkaConsumer:
     settings = get_settings()
     return KafkaConsumer(
-        settings.kafka_topic_observations,
+        topic or settings.kafka_topic_observations,
         bootstrap_servers=settings.kafka_bootstrap_servers,
-        group_id=settings.kafka_consumer_group,
+        group_id=group_id or settings.kafka_consumer_group,
         key_deserializer=lambda key: key.decode("utf-8") if key else None,
         value_deserializer=lambda value: json.loads(value.decode("utf-8")),
         auto_offset_reset="earliest",

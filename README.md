@@ -150,7 +150,7 @@ Open-Meteo
 docker compose -f docker-compose.yml -f docker-compose.streaming.yml up -d
 ```
 
-Adds Redpanda on Kafka port `19092`, admin API on `19644`, and **Console UI** on http://localhost:8080.
+Adds Redpanda on Kafka port `19092`, admin API on `19644`, **Console** on http://localhost:8080, and **Grafana** on http://localhost:3000.
 
 ### 2. Configure `.env`
 
@@ -164,17 +164,20 @@ PRODUCER_POLL_INTERVAL_SECONDS=600
 
 ### 3. Run streaming pipeline
 
-Three terminals:
+Four terminals:
 
 ```powershell
-# Terminal 1 — consumer (must start first to process messages)
+# Terminal 1 — ETL consumer
 meteo-stream-consumer
 
 # Terminal 2 — producer (poll Open-Meteo, publish to Kafka)
 meteo-stream-producer --once   # test one cycle
 meteo-stream-producer          # continuous, every 10 min
 
-# Terminal 3 — API (unchanged)
+# Terminal 3 — alert evaluator
+meteo-stream-alerter
+
+# Terminal 4 — API
 meteo-serve
 ```
 
@@ -206,8 +209,85 @@ Redpanda Console (web UI): http://localhost:8080 — browse topics, messages, an
 | Orchestration | Prefect cron                                        | Redpanda + producer/consumer                     |
 | Entrypoints   | `meteo-ingest`                                      | `meteo-stream-producer`, `meteo-stream-consumer` |
 | Serving       | `meteo-serve`                                       | `meteo-serve` (same)                             |
+| Dashboards    | —                                                   | Grafana http://localhost:3000                    |
+| Alerting      | —                                                   | `meteo-stream-alerter` + `weather.alerts`      |
 | Run together? | No — pick one ingest path to avoid duplicate writes |                                                  |
 
+
+### 5. Live dashboards (Grafana)
+
+Grafana is included in the streaming compose overlay. It reads directly from TimescaleDB and auto-refreshes every 30 seconds.
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.streaming.yml up -d
+```
+
+Open http://localhost:3000 — login `admin` / `meteo`.
+
+Pre-built dashboard: **Meteo Live** — temperature, wind, rain, humidity, and recent alerts per location.
+
+For existing databases created before this feature, run:
+
+```powershell
+Get-Content scripts/migrate_alerts.sql | docker exec -i meteo-timescaledb-1 psql -U meteo -d meteo
+```
+
+
+### 6. Alerting service
+
+A separate Kafka consumer evaluates threshold rules on each observation batch and writes to the `alerts` table + `weather.alerts` topic.
+
+```powershell
+# Terminal 4 — alert evaluator (parallel to ETL consumer)
+meteo-stream-alerter
+```
+
+Edit rules in `config/alerts.yaml`:
+
+```yaml
+rules:
+  - id: heavy_rain
+    metric: precipitation_mm
+    operator: gt
+    threshold: 2.0
+    severity: warning
+    message: "Heavy rain detected"
+```
+
+Optional webhook notification in `.env`:
+
+```env
+ALERT_WEBHOOK_URL=https://your-service.example/alerts
+ALERT_COOLDOWN_SECONDS=1800
+```
+
+Query alerts via API:
+
+```powershell
+Invoke-RestMethod http://localhost:8000/alerts
+Invoke-RestMethod http://localhost:8000/alerts?location_id=minsk
+```
+
+Inspect alert events in Redpanda Console → topic `weather.alerts`.
+
+### Extended streaming architecture
+
+```
+Open-Meteo
+    │
+    ▼
+ Producer ──► weather.observations (Redpanda)
+                    │
+         ┌──────────┴──────────┐
+         ▼                     ▼
+    ETL Consumer          Alert service
+         │                     │
+         ▼                     ├──► weather.alerts
+    TimescaleDB ◄──────────────┘         │
+         │                          webhook (optional)
+         ├──► Grafana (live dashboards)
+         └──► FastAPI (/alerts, /observations/.../latest)
+```
 
 ---
 
@@ -243,8 +323,12 @@ src/meteo/                 # Approach 1 — micro-batch
 src/meteo_stream/          # Approach 2 — streaming
   producer.py              # poll APIs → Kafka
   consumer.py              # Kafka → TimescaleDB + features
+  alerter.py               # rule-based alerts → DB + weather.alerts
+  rules.py                 # alert rule loader/evaluator
   schemas.py               # message validation
   kafka_client.py          # producer/consumer factories
+config/alerts.yaml         # alert thresholds
+grafana/                   # live dashboard + TimescaleDB datasource
 ```
 
 
@@ -258,4 +342,6 @@ See `.env`. Key settings:
 - `OPENWEATHER_API_KEY` — optional backup source
 - `KAFKA_BOOTSTRAP_SERVERS` — Redpanda/Kafka address (Approach 2)
 - `PRODUCER_POLL_INTERVAL_SECONDS` — producer poll interval, default 600 (10 min)
+- `ALERT_WEBHOOK_URL` — optional HTTP POST on alert fire
+- `ALERT_COOLDOWN_SECONDS` — suppress duplicate alerts per rule/location (default 1800)
 

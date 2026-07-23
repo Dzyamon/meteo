@@ -28,6 +28,7 @@ meteo-ingest = "meteo.flows.ingest:run_once"
 meteo-serve = "meteo.api.main:serve"
 meteo-stream-producer = "meteo_stream.producer:main"
 meteo-stream-consumer = "meteo_stream.consumer:main"
+meteo-stream-alerter = "meteo_stream.alerter:main"
 
 [build-system]
 requires = ["setuptools>=75"]

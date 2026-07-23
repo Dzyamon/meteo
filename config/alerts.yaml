@@ -1,0 +1,31 @@
+# Threshold rules evaluated on each streaming observation batch.
+# Operators: gt, gte, lt, lte
+
+rules:
+  - id: heavy_rain
+    metric: precipitation_mm
+    operator: gt
+    threshold: 2.0
+    severity: warning
+    message: "Heavy rain detected"
+
+  - id: high_wind
+    metric: wind_speed_ms
+    operator: gt
+    threshold: 10.0
+    severity: warning
+    message: "High wind detected"
+
+  - id: freezing
+    metric: temperature_c
+    operator: lt
+    threshold: 0.0
+    severity: critical
+    message: "Freezing temperature detected"
+
+  - id: heat_wave
+    metric: temperature_c
+    operator: gt
+    threshold: 30.0
+    severity: warning
+    message: "High temperature detected"

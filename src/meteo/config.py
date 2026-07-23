@@ -33,7 +33,12 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = "localhost:19092"
     kafka_topic_observations: str = "weather.observations"
     kafka_consumer_group: str = "meteo-stream-consumer"
+    kafka_consumer_group_alerts: str = "meteo-stream-alerter"
+    kafka_topic_alerts: str = "weather.alerts"
     producer_poll_interval_seconds: int = 600
+    alerts_config: Path = Path("config/alerts.yaml")
+    alert_cooldown_seconds: int = 1800
+    alert_webhook_url: str = ""
 
 
 @lru_cache

@@ -159,5 +159,62 @@ class TimescaleStore:
                 cur.execute(sql, (location_id,))
                 return cur.fetchall()
 
+    def save_alert(self, row: dict) -> None:
+        sql = """
+            INSERT INTO alerts (
+                id, triggered_at, location_id, rule_id, severity,
+                metric, value, threshold, message, observation_time
+            ) VALUES (
+                %(id)s, %(triggered_at)s, %(location_id)s, %(rule_id)s, %(severity)s,
+                %(metric)s, %(value)s, %(threshold)s, %(message)s, %(observation_time)s
+            )
+        """
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, row)
+            conn.commit()
+
+    def recent_alert_exists(
+        self,
+        location_id: str,
+        rule_id: str,
+        within_seconds: int,
+    ) -> bool:
+        sql = """
+            SELECT 1
+            FROM alerts
+            WHERE location_id = %s
+              AND rule_id = %s
+              AND triggered_at > NOW() - (%s * INTERVAL '1 second')
+            LIMIT 1
+        """
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (location_id, rule_id, within_seconds))
+                return cur.fetchone() is not None
+
+    def list_alerts(self, location_id: str | None = None, limit: int = 50) -> list[dict]:
+        if location_id:
+            sql = """
+                SELECT *
+                FROM alerts
+                WHERE location_id = %s
+                ORDER BY triggered_at DESC
+                LIMIT %s
+            """
+            params = (location_id, limit)
+        else:
+            sql = """
+                SELECT *
+                FROM alerts
+                ORDER BY triggered_at DESC
+                LIMIT %s
+            """
+            params = (limit,)
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                return cur.fetchall()
+
     def close(self) -> None:
         self._pool.close()
