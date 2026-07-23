@@ -2,12 +2,18 @@ name: meteo
 prefect-version: 3.0.0
 
 deployments:
-  - name: meteo-every-10min
+  # Approach 1 observation ingest — now on model-pool (same containerized worker),
+  # every 6h. 48h lookback per call means no gaps between runs. Runs before the
+  # GFS/AIFS fetches so fresh ground truth is present for the daily train.
+  - name: obs-ingest-6h
     entrypoint: src/meteo/flows/ingest.py:meteo_micro_batch_flow
     work_pool:
-      name: default-agent-pool
+      name: model-pool
+    pull:
+      - prefect.deployments.steps.set_working_directory:
+          directory: /app
     schedules:
-      - cron: "*/10 * * * *"
+      - cron: "0 5,11,17,23 * * *"
         timezone: UTC
 
   # Approach 3 (model-centric) — run on model-pool, served by the containerized

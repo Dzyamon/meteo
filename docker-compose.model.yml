@@ -16,16 +16,21 @@ services:
     environment:
       DATABASE_URL: postgresql://meteo:meteo@timescaledb:5432/meteo
       PREFECT_API_URL: http://prefect-server:4200/api
-      USE_LOCAL_BRONZE: "true"
-      LOCAL_BRONZE_PATH: /app/data/bronze
+      # Bronze -> MinIO (S3). Endpoint is the compose service name, not localhost.
+      USE_LOCAL_BRONZE: "false"
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: meteo-bronze
       MODEL_DIR: /app/models
       NWP_FORECAST_HOURS: "48"
     volumes:
-      - ./data:/app/data
       - ./models:/app/models
       - ./config:/app/config:ro
     depends_on:
       timescaledb:
+        condition: service_healthy
+      minio:
         condition: service_healthy
       prefect-server:
         condition: service_started
