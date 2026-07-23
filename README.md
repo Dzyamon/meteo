@@ -374,6 +374,30 @@ Invoke-RestMethod "http://localhost:8000/eval/minsk"   # aifs_raw vs gfs_raw vs 
 
 `GET /eval/{location}?hours=` scores the **latest forecast per (model, valid_time)** against observations (MAE / RMSE / signed bias per variable), so short-lead re-forecasts don't distort the ranking. This turns the shared `model_version` schema into a real multi-model benchmark: physics (GFS) vs AI (AIFS) vs locally-corrected vs Open-Meteo blend.
 
+### 6. Schedule with Prefect
+
+GFS on AWS is retained only ~10 days, so cycles must be captured continuously. A **containerized Prefect worker** (built from `Dockerfile.model`, so it has GRIB tooling + LightGBM) runs the model flows on the `model-pool`:
+
+| Deployment | Flow | Schedule (UTC) |
+| --- | --- | --- |
+| `gfs-fetch-6h` | fetch GFS → correct → predictions | `30 5,11,17,23 * * *` |
+| `aifs-fetch-6h` | fetch AIFS → `aifs_raw` | `35 5,11,17,23 * * *` |
+| `model-train-daily` | holdout-validated retrain + predict | `0 6 * * *` |
+
+```powershell
+# 1) server + worker (worker auto-creates model-pool, restarts until server is up)
+docker compose -f docker-compose.yml -f docker-compose.model.yml up -d --build
+
+# 2) register schedules (from the host; flows import lazily so no [model] extra needed)
+$env:PREFECT_API_URL = "http://localhost:4200/api"
+prefect deploy --all
+
+# 3) keep Approach 1 collecting observations on the host pool (ground truth for training)
+prefect worker start --pool default-agent-pool
+```
+
+The model deployments pin their working directory to `/app` (where the image holds the code); the host `meteo-every-10min` deployment keeps the host path. The worker never writes observations — Approach 1/2 does.
+
 ### Approaches 1/2 vs 3
 
 |               | Approach 1/2                     | Approach 3                                      |
