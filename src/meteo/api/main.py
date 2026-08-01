@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 
 from meteo.config import load_locations
 from meteo.storage.timescale import TimescaleStore
 
 app = FastAPI(title="Meteo Nowcasting API", version="0.1.0")
+
+_STATIC = Path(__file__).parent / "static"
+
+
+@app.get("/", include_in_schema=False)
+def dashboard() -> FileResponse:
+    """Model-comparison dashboard (physics vs AI vs corrected vs ensemble)."""
+    return FileResponse(_STATIC / "index.html")
 
 
 @app.get("/health")
