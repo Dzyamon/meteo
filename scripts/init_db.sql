@@ -83,6 +83,19 @@ CREATE TABLE IF NOT EXISTS predictions (
 
 SELECT create_hypertable('predictions', 'created_at', if_not_exists => TRUE);
 
+-- Champion model per (location, variable): the best model_version chosen by
+-- out-of-sample scoring, used to serve the "best-available" forecast.
+CREATE TABLE IF NOT EXISTS model_champions (
+    location_id   TEXT NOT NULL,
+    variable      TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    mae           DOUBLE PRECISION,
+    n_scored      INTEGER,
+    window_hours  INTEGER,
+    evaluated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (location_id, variable)
+);
+
 -- Alerts fired by the streaming alert service
 CREATE TABLE IF NOT EXISTS alerts (
     id              UUID        NOT NULL DEFAULT gen_random_uuid(),

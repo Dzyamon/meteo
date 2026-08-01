@@ -398,6 +398,22 @@ prefect worker start --pool default-agent-pool
 
 The model deployments pin their working directory to `/app` (where the image holds the code); the host `meteo-every-10min` deployment keeps the host path. The worker never writes observations — Approach 1/2 does.
 
+### 6. Ensemble + champion selection
+
+Blend all the models into one best forecast, and auto-serve the winner per variable:
+
+```powershell
+python -m meteo_model.ensemble.train     # stack gfs_corrected / aifs_raw / gfs_raw / baseline
+python -m meteo_model.ensemble.predict   # write model_version=ensemble
+python -m meteo_model.champion           # pick lowest-MAE model per (location, variable)
+Invoke-RestMethod "http://localhost:8000/best/minsk"        # champion per variable, merged
+Invoke-RestMethod "http://localhost:8000/champions/minsk"   # who won + MAE
+```
+
+- **Ensemble** is a LightGBM stacking model over the member forecasts; it deploys per target only if it **beats the best single member** on a time-based holdout (same promotion gate as the correction).
+- **Champion** is the lowest-MAE `model_version` per `(location, variable)`, persisted to `model_champions` and served by `/best`.
+- Scheduled daily via the `ensemble-daily` Prefect deployment. See **[PIPELINE.md](PIPELINE.md)** for the full end-to-end runbook.
+
 ### Approaches 1/2 vs 3
 
 |               | Approach 1/2                     | Approach 3                                      |

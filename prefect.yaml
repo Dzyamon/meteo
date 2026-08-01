@@ -53,3 +53,16 @@ deployments:
     schedules:
       - cron: "0 6 * * *"
         timezone: UTC
+
+  # After the correction retrain, stack the members into an ensemble and
+  # re-pick the champion model per (location, variable).
+  - name: ensemble-daily
+    entrypoint: src/meteo_model/flows.py:ensemble_flow
+    work_pool:
+      name: model-pool
+    pull:
+      - prefect.deployments.steps.set_working_directory:
+          directory: /app
+    schedules:
+      - cron: "20 6 * * *"
+        timezone: UTC

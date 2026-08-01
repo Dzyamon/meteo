@@ -351,5 +351,79 @@ class TimescaleStore:
                 cur.execute(sql, {"loc": location_id, "hours": since_hours, "source": source})
                 return cur.fetchall()
 
+    def fetch_ensemble_training_rows(self, location_id: str, members: list[str]) -> list[dict]:
+        """Latest forecast per (member, valid_time) joined to the observation at that
+        time — long format, one row per member per valid_time. The ensemble trainer
+        pivots these into per-valid_time member columns."""
+        sql = """
+            WITH latest AS (
+                SELECT DISTINCT ON (model_version, valid_time)
+                    model_version, valid_time, horizon_hours,
+                    temperature_c, precipitation_mm, wind_speed_ms
+                FROM predictions
+                WHERE location_id = %(loc)s AND model_version = ANY(%(members)s)
+                ORDER BY model_version, valid_time, created_at DESC
+            )
+            SELECT l.valid_time, l.model_version, l.horizon_hours,
+                   l.temperature_c, l.precipitation_mm, l.wind_speed_ms,
+                   o.temperature_c   AS obs_temperature_c,
+                   o.precipitation_mm AS obs_precipitation_mm,
+                   o.wind_speed_ms   AS obs_wind_speed_ms
+            FROM latest l
+            JOIN observations o
+              ON o.location_id = %(loc)s AND o.source = 'open_meteo' AND o.time = l.valid_time
+            ORDER BY l.valid_time, l.model_version
+        """
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {"loc": location_id, "members": members})
+                return cur.fetchall()
+
+    def fetch_latest_member_forecasts(self, location_id: str, members: list[str]) -> list[dict]:
+        """Latest forecast per (member, valid_time), including future valid_times —
+        the inputs the ensemble predictor blends."""
+        sql = """
+            SELECT DISTINCT ON (model_version, valid_time)
+                model_version, valid_time, horizon_hours,
+                temperature_c, precipitation_mm, wind_speed_ms
+            FROM predictions
+            WHERE location_id = %(loc)s AND model_version = ANY(%(members)s)
+            ORDER BY model_version, valid_time, created_at DESC
+        """
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {"loc": location_id, "members": members})
+                return cur.fetchall()
+
+    def upsert_champions(self, rows: list[dict]) -> int:
+        if not rows:
+            return 0
+        sql = """
+            INSERT INTO model_champions (
+                location_id, variable, model_version, mae, n_scored, window_hours, evaluated_at
+            ) VALUES (
+                %(location_id)s, %(variable)s, %(model_version)s, %(mae)s, %(n_scored)s,
+                %(window_hours)s, %(evaluated_at)s
+            )
+            ON CONFLICT (location_id, variable) DO UPDATE SET
+                model_version = EXCLUDED.model_version,
+                mae = EXCLUDED.mae,
+                n_scored = EXCLUDED.n_scored,
+                window_hours = EXCLUDED.window_hours,
+                evaluated_at = EXCLUDED.evaluated_at
+        """
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(sql, rows)
+            conn.commit()
+        return len(rows)
+
+    def fetch_champions(self, location_id: str) -> list[dict]:
+        sql = "SELECT * FROM model_champions WHERE location_id = %s ORDER BY variable"
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (location_id,))
+                return cur.fetchall()
+
     def close(self) -> None:
         self._pool.close()

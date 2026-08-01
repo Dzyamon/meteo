@@ -121,6 +121,66 @@ def evaluate(location_id: str, hours: int = 168) -> dict:
         db.close()
 
 
+@app.get("/champions/{location_id}")
+def get_champions(location_id: str) -> dict:
+    """The current best model_version per variable (from out-of-sample scoring)."""
+    db = TimescaleStore()
+    try:
+        rows = db.fetch_champions(location_id)
+        if not rows:
+            raise HTTPException(status_code=404, detail=f"No champions selected for {location_id}")
+        return {
+            "location_id": location_id,
+            "champions": {
+                r["variable"]: {
+                    "model_version": r["model_version"],
+                    "mae": r["mae"],
+                    "n_scored": r["n_scored"],
+                    "window_hours": r["window_hours"],
+                    "evaluated_at": r["evaluated_at"],
+                }
+                for r in rows
+            },
+        }
+    finally:
+        db.close()
+
+
+@app.get("/best/{location_id}")
+def best_forecast(location_id: str) -> dict:
+    """Best-available forecast: each variable served from its champion model_version."""
+    db = TimescaleStore()
+    try:
+        champs = db.fetch_champions(location_id)
+        if not champs:
+            raise HTTPException(status_code=404, detail=f"No champions for {location_id}; run selection first")
+
+        by_variable = {c["variable"]: c["model_version"] for c in champs}
+        preds_by_version = {
+            v: db.latest_predictions(location_id, model_version=v)
+            for v in set(by_variable.values())
+        }
+
+        by_vt: dict = {}
+        for variable, version in by_variable.items():
+            for p in preds_by_version.get(version, []):
+                vt = p["valid_time"]
+                slot = by_vt.setdefault(
+                    vt,
+                    {"valid_time": vt, "horizon_hours": p["horizon_hours"],
+                     "temperature_c": None, "wind_speed_ms": None, "precipitation_mm": None, "sources": {}},
+                )
+                slot[variable] = p[variable]
+                slot["sources"][variable] = version
+
+        forecast = [by_vt[vt] for vt in sorted(by_vt)]
+        if not forecast:
+            raise HTTPException(status_code=404, detail=f"No forecasts available for {location_id}")
+        return {"location_id": location_id, "champions": by_variable, "forecast": forecast}
+    finally:
+        db.close()
+
+
 @app.get("/observations/{location_id}/latest")
 def latest_observation(location_id: str) -> dict:
     db = TimescaleStore()

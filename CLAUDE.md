@@ -39,7 +39,9 @@ meteo-model-predict      # Approach 3: re-apply correction to latest forecast wi
 meteo-ai-fetch           # Approach 3: pull ECMWF AIFS (via Open-Meteo API) as model_version aifs_raw (host, no GRIB)
 ```
 
-Scripts for bootstrapping training history: `scripts/backfill_observations.py` (host, Open-Meteo archive) and `scripts/backfill_gfs.py` (container). Multi-model accuracy benchmark: `GET /eval/{location}?hours=` scores the latest forecast per (model_version, valid_time) against observations (MAE/RMSE/bias) — the fair way to compare gfs_raw / gfs_corrected / aifs_raw / open_meteo_baseline.
+Scripts for bootstrapping training history: `scripts/backfill_observations.py` (host, Open-Meteo archive) and `scripts/backfill_gfs.py` (container). Multi-model accuracy benchmark: `GET /eval/{location}?hours=` scores the latest forecast per (model_version, valid_time) against observations (MAE/RMSE/bias) — the fair way to compare gfs_raw / gfs_corrected / aifs_raw / open_meteo_baseline / ensemble.
+
+Ensemble + champion (`src/meteo_model/ensemble/`, `champion.py`): `meteo-ensemble-train` stacks the member forecasts into `model_version='ensemble'` (deploys only if it beats the best single member on a holdout); `meteo-champion-select` picks the lowest-MAE model per `(location, variable)` into `model_champions`; `GET /best/{location}` serves the champion per variable and `GET /champions/{location}` lists them. Scheduled daily via the `ensemble-daily` deployment. Full runbook: `PIPELINE.md`.
 
 Approach 3 GRIB decoding (`eccodes`/`cfgrib`) runs in a Linux container to avoid Windows eccodes pain:
 

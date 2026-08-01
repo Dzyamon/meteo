@@ -43,6 +43,9 @@ meteo-model-fetch = "meteo_model.flows:run_once"
 meteo-model-train = "meteo_model.correct.train:main"
 meteo-model-predict = "meteo_model.correct.predict:main"
 meteo-ai-fetch = "meteo_model.ai_pipeline:main"
+meteo-ensemble-train = "meteo_model.ensemble.train:main"
+meteo-ensemble-predict = "meteo_model.ensemble.predict:main"
+meteo-champion-select = "meteo_model.champion:main"
 
 [build-system]
 requires = ["setuptools>=75"]

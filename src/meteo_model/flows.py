@@ -50,6 +50,21 @@ def train_flow() -> dict:
     return {"train": trained, "predict": predicted}
 
 
+@flow(name="meteo-ensemble", log_prints=True)
+def ensemble_flow() -> dict:
+    """Train the stacking ensemble, produce ensemble predictions, then re-select
+    the champion model per (location, variable)."""
+    from meteo_model.champion import select_all
+    from meteo_model.ensemble.predict import predict_all as ensemble_predict
+    from meteo_model.ensemble.train import train_all as ensemble_train
+
+    trained = ensemble_train()
+    predicted = ensemble_predict()
+    champions = select_all()
+    print(f"ensemble train={trained} predict={predicted} champions={champions}")
+    return {"train": trained, "predict": predicted, "champions": champions}
+
+
 def run_once() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     meteo_model_flow()
