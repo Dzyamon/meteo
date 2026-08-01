@@ -98,6 +98,10 @@
     <button data-var="wind_speed_ms" aria-pressed="false">Wind</button>
     <button data-var="precipitation_mm" aria-pressed="false">Precip</button>
   </div>
+  <div class="seg" id="tzseg" role="group" aria-label="Timezone">
+    <button data-tz="UTC" aria-pressed="true">UTC</button>
+    <button data-tz="local" aria-pressed="false">Local</button>
+  </div>
   <button id="theme" title="Toggle theme">◐</button>
   <button id="refresh" title="Reload">↻</button>
 </header>
@@ -110,6 +114,7 @@
 
   <section class="card">
     <h2 id="fc-title">Best-available forecast</h2>
+    <div id="fc-sub" class="muted" style="font-size:12px;margin:-8px 0 12px"></div>
     <div class="legend" id="fc-legend"></div>
     <div id="fc-chart"><div class="empty">Loading…</div></div>
   </section>
@@ -140,20 +145,39 @@ const MODELS = [
   { id: "open_meteo_baseline_v0", label: "Open-Meteo",    color: "var(--m-ref2)",     dashed: false, inLine: false },
 ];
 const MODEL = Object.fromEntries(MODELS.map(m => [m.id, m]));
-let state = { loc: null, variable: "temperature_c" };
+let state = { loc: null, variable: "temperature_c", tz: "UTC", locTz: "UTC" };
 
 const $ = s => document.querySelector(s);
 const tip = $("#tip");
 async function getJSON(url) { const r = await fetch(API + url); if (!r.ok) return null; return r.json(); }
 function fmt(v, d = 1) { return v == null ? "—" : (+v).toFixed(d); }
 
+// Time display in the selected zone (UTC or the location's IANA zone).
+function tzName() { return state.tz === "local" ? state.locTz : "UTC"; }
+function tzLabel() { return state.tz === "local" ? state.locTz.split("/").pop().replace(/_/g, " ") : "UTC"; }
+function tParts(t) {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: tzName(), hourCycle: "h23", hour: "2-digit", minute: "2-digit", day: "numeric", month: "numeric" }).formatToParts(new Date(t));
+  const g = k => +(p.find(x => x.type === k)?.value);
+  return { h: g("hour") % 24, m: g("minute"), day: g("day"), mon: g("month") };
+}
+function tStamp(t) {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: tzName(), hourCycle: "h23", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(t));
+}
+
 async function init() {
   const locs = await getJSON("/locations") || [];
   const sel = $("#loc");
   sel.innerHTML = locs.map(l => `<option value="${l.id}">${l.name}</option>`).join("");
+  const tzOf = id => (locs.find(l => l.id === id)?.timezone) || "UTC";
   state.loc = locs[0]?.id;
-  sel.onchange = () => { state.loc = sel.value; render(); };
+  state.locTz = tzOf(state.loc);
+  sel.onchange = () => { state.loc = sel.value; state.locTz = tzOf(sel.value); render(); };
   $("#refresh").onclick = render;
+  document.querySelectorAll("#tzseg button").forEach(b => b.onclick = () => {
+    document.querySelectorAll("#tzseg button").forEach(x => x.setAttribute("aria-pressed", "false"));
+    b.setAttribute("aria-pressed", "true");
+    state.tz = b.dataset.tz; render();
+  });
   $("#theme").onclick = () => {
     const cur = document.documentElement.getAttribute("data-theme");
     document.documentElement.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
@@ -215,8 +239,11 @@ function renderForecast(series) {
   const legend = $("#fc-legend");
   legend.innerHTML = lines.map(l =>
     `<span><span class="swatch" style="background:${l.color};${l.dashed ? "opacity:.6" : ""}"></span>${l.label}</span>`).join("");
-  const host = $("#fc-chart");
-  if (!lines.length) { host.innerHTML = `<div class="empty">No forecast data for this variable yet.</div>`; return; }
+  const host = $("#fc-chart"), sub = $("#fc-sub");
+  if (!lines.length) { sub.textContent = ""; host.innerHTML = `<div class="empty">No forecast data for this variable yet.</div>`; return; }
+  const allPts = lines.flatMap(l => l.pts);
+  const tMin = Math.min(...allPts.map(p => p.t)), tMax = Math.max(...allPts.map(p => p.t));
+  sub.textContent = `${tStamp(tMin)} → ${tStamp(tMax)} · times in ${tzLabel()}`;
   host.innerHTML = lineChart(lines, unit);
   wireLineHover(host.querySelector("svg"), lines, unit);
 }
@@ -239,15 +266,18 @@ function lineChart(lines, unit) {
     g += `<line class="grid-line" x1="${m.l}" y1="${yy}" x2="${W - m.r}" y2="${yy}"/>`;
     g += `<text class="tick" x="${m.l - 8}" y="${yy + 4}" text-anchor="end">${val.toFixed(unit === "°C" ? 0 : 1)}</text>`;
   }
-  // x time ticks (every ~6h)
+  // x time ticks — labelled in the selected zone; date shown on the first tick
+  // and whenever the day changes.
   const span = tMax - tMin, step = span > 24 * 3.6e6 ? 12 * 3.6e6 : 6 * 3.6e6;
+  let prevDay = null;
   for (let t = Math.ceil(tMin / step) * step; t <= tMax; t += step) {
-    const xx = x(t), d = new Date(t);
-    const lbl = d.getUTCHours().toString().padStart(2, "0") + ":00";
-    const day = (d.getUTCHours() < step / 3.6e6) ? `${d.getUTCMonth() + 1}/${d.getUTCDate()}` : "";
+    const xx = x(t), p = tParts(t);
+    const lbl = String(p.h).padStart(2, "0") + ":" + String(p.m).padStart(2, "0");
+    const showDate = prevDay === null || p.day !== prevDay;
+    prevDay = p.day;
     g += `<line class="grid-line" x1="${xx}" y1="${m.t}" x2="${xx}" y2="${H - m.b}" opacity=".5"/>`;
     g += `<text class="tick" x="${xx}" y="${H - m.b + 16}" text-anchor="middle">${lbl}</text>`;
-    if (day) g += `<text class="tick" x="${xx}" y="${H - m.b + 27}" text-anchor="middle" opacity=".8">${day}</text>`;
+    if (showDate) g += `<text class="tick" x="${xx}" y="${H - m.b + 27}" text-anchor="middle" opacity=".8">${p.mon}/${p.day}</text>`;
   }
   // paths + end labels
   let paths = "", labels = "";
@@ -280,7 +310,7 @@ function wireLineHover(svg, lines, unit) {
       const near = l.pts.reduce((a, b) => Math.abs(b.t - d.getTime()) < Math.abs(a.t - d.getTime()) ? b : a);
       return `<div><span class="dot" style="background:${l.color}"></span>${l.label}: <b>${near.v.toFixed(1)}</b> ${unit}</div>`;
     }).join("");
-    tip.innerHTML = `<div class="muted">${d.getUTCMonth() + 1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2, "0")}:00 UTC</div>${rows}`;
+    tip.innerHTML = `<div class="muted">${tStamp(d.getTime())} ${tzLabel()}</div>${rows}`;
     tip.style.left = Math.min(e.clientX + 14, innerWidth - 200) + "px";
     tip.style.top = (e.clientY + 14) + "px"; tip.style.opacity = 1;
   });
