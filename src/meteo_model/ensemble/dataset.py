@@ -9,7 +9,9 @@ from meteo_model.schemas import CORRECTION_TARGETS
 
 # Member forecasts blended by the ensemble. Order fixes the feature-column order.
 # gfs_corrected is derived from gfs_raw, but stacking can still weight them.
-ENSEMBLE_MEMBERS = ["gfs_corrected", "gfs_raw", "aifs_raw", "open_meteo_baseline_v0"]
+# Diverse sources (GFS physics, AIFS AI, ICON physics) give the stack complementary
+# errors to exploit.
+ENSEMBLE_MEMBERS = ["gfs_corrected", "gfs_raw", "aifs_raw", "icon_raw", "open_meteo_baseline_v0"]
 
 # Ensemble predicts each observed variable from the members' forecasts of it.
 ENSEMBLE_TARGETS = list(CORRECTION_TARGETS.keys())

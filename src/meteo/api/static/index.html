@@ -11,7 +11,7 @@
     --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
     --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10);
     --good: #0ca30c;
-    --m-ensemble: #2a78d6; --m-corrected: #eb6834; --m-aifs: #1baf7a;
+    --m-ensemble: #2a78d6; --m-corrected: #eb6834; --m-aifs: #1baf7a; --m-icon: #eda100;
     --m-ref: #898781; --m-ref2: #b8b6ae;
   }
   @media (prefers-color-scheme: dark) {
@@ -21,7 +21,7 @@
       --ink: #fff; --ink2: #c3c2b7; --muted: #898781;
       --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10);
       --good: #0ca30c;
-      --m-ensemble: #3987e5; --m-corrected: #d95926; --m-aifs: #199e70;
+      --m-ensemble: #3987e5; --m-corrected: #d95926; --m-aifs: #199e70; --m-icon: #c98500;
       --m-ref: #898781; --m-ref2: #6b6a64;
     }
   }
@@ -30,7 +30,7 @@
     --plane: #0d0d0d; --surface: #1a1a19;
     --ink: #fff; --ink2: #c3c2b7; --muted: #898781;
     --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10);
-    --m-ensemble: #3987e5; --m-corrected: #d95926; --m-aifs: #199e70;
+    --m-ensemble: #3987e5; --m-corrected: #d95926; --m-aifs: #199e70; --m-icon: #c98500;
     --m-ref: #898781; --m-ref2: #6b6a64;
   }
   * { box-sizing: border-box; }
@@ -135,6 +135,7 @@ const MODELS = [
   { id: "ensemble",               label: "Ensemble",      color: "var(--m-ensemble)", dashed: false, inLine: true },
   { id: "gfs_corrected",          label: "GFS corrected", color: "var(--m-corrected)", dashed: false, inLine: true },
   { id: "aifs_raw",               label: "AIFS (AI)",     color: "var(--m-aifs)",     dashed: false, inLine: true },
+  { id: "icon_raw",               label: "ICON (DWD)",    color: "var(--m-icon)",     dashed: false, inLine: false },
   { id: "gfs_raw",                label: "GFS raw",       color: "var(--m-ref)",      dashed: true,  inLine: true },
   { id: "open_meteo_baseline_v0", label: "Open-Meteo",    color: "var(--m-ref2)",     dashed: false, inLine: false },
 ];

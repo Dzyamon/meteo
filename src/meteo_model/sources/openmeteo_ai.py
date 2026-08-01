@@ -26,20 +26,23 @@ def _at(hourly: dict, key: str, idx: int) -> float | None:
 
 def fetch_forecast(
     location: Location,
+    model_id: str,
+    model_name: str,
     forecast_hours: int | None = None,
     client: OpenMeteoClient | None = None,
 ) -> tuple[datetime, list[NwpForecastRow]]:
-    """Fetch an Open-Meteo-served AI model (AIFS) forecast as NwpForecastRows.
+    """Fetch an Open-Meteo-served model forecast as NwpForecastRows.
 
-    Unlike GFS this is a point forecast (JSON), so no GRIB/grid extraction and no
-    container needed. Stored under model name `aifs` for side-by-side comparison.
+    Unlike GFS these are point forecasts (JSON), so no GRIB/grid extraction and no
+    container needed. `model_id` is the Open-Meteo id (e.g. 'ecmwf_aifs025_single',
+    'icon_seamless'); `model_name` is how we store it (e.g. 'aifs', 'icon').
     """
     settings = get_settings()
     forecast_hours = forecast_hours or settings.nwp_forecast_hours
     owns_client = client is None
     client = client or OpenMeteoClient()
     try:
-        payload = client.fetch_model_forecast(location, settings.aifs_openmeteo_model, forecast_hours)
+        payload = client.fetch_model_forecast(location, model_id, forecast_hours)
     finally:
         if owns_client:
             client.close()
@@ -59,7 +62,7 @@ def fetch_forecast(
                 run_time=run_time,
                 valid_time=valid_time,
                 location_id=location.id,
-                model=settings.aifs_model_name,
+                model=model_name,
                 horizon_hours=horizon,
                 temperature_c=_at(hourly, "temperature_2m", idx),
                 precipitation_mm=_at(hourly, "precipitation", idx),
@@ -70,5 +73,5 @@ def fetch_forecast(
                 cloud_cover_pct=_at(hourly, "cloud_cover", idx),
             )
         )
-    logger.info("Fetched %s AIFS horizons for %s (run %s)", len(rows), location.id, run_time.isoformat())
+    logger.info("Fetched %s %s horizons for %s (run %s)", len(rows), model_name, location.id, run_time.isoformat())
     return run_time, rows

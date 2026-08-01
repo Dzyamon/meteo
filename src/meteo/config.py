@@ -46,9 +46,11 @@ class Settings(BaseSettings):
     model_dir: Path = Path("./models")
     bias_correction_min_samples: int = 300
     validation_holdout_fraction: float = 0.2  # most-recent share held out for out-of-sample MAE
-    # AI model comparison (Open-Meteo-served ECMWF AIFS)
-    aifs_openmeteo_model: str = "ecmwf_aifs025_single"
-    aifs_model_name: str = "aifs"
+    # Extra forecast sources pulled from the Open-Meteo API as additional
+    # model_versions, "<open-meteo-id>:<our-name>" comma-separated. AIFS = ECMWF's
+    # AI model; ICON = DWD physics model. Each becomes nwp_forecasts(<name>) +
+    # predictions(<name>_raw) and an ensemble member.
+    openmeteo_models: str = "ecmwf_aifs025_single:aifs,icon_seamless:icon"
 
 
 @lru_cache
