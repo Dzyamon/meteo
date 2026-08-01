@@ -22,8 +22,13 @@ _NON_NEGATIVE = {"precipitation_mm", "wind_speed_ms"}
 
 
 def predict_location(location_id: str, db: TimescaleStore) -> dict:
-    models = {t: load_ensemble(location_id, t) for t in ENSEMBLE_TARGETS}
-    models = {t: b for t, b in models.items() if b is not None}
+    # Only use models whose member set matches the current one — a changed
+    # member list (e.g. adding ICON) makes older bundles feature-incompatible.
+    models = {}
+    for t in ENSEMBLE_TARGETS:
+        b = load_ensemble(location_id, t)
+        if b is not None and b.get("members") == ENSEMBLE_MEMBERS:
+            models[t] = b
     if not models:
         return {"location_id": location_id, "predictions": 0, "ensemble_active": False}
 
