@@ -99,8 +99,8 @@
     <button data-var="precipitation_mm" aria-pressed="false">Precip</button>
   </div>
   <div class="seg" id="tzseg" role="group" aria-label="Timezone">
-    <button data-tz="UTC" aria-pressed="true">UTC</button>
-    <button data-tz="local" aria-pressed="false">Local</button>
+    <button data-tz="local" aria-pressed="true">Local</button>
+    <button data-tz="UTC" aria-pressed="false">UTC</button>
   </div>
   <button id="theme" title="Toggle theme">◐</button>
   <button id="refresh" title="Reload">↻</button>
@@ -145,7 +145,7 @@ const MODELS = [
   { id: "open_meteo_baseline_v0", label: "Open-Meteo",    color: "var(--m-ref2)",     dashed: false, inLine: false },
 ];
 const MODEL = Object.fromEntries(MODELS.map(m => [m.id, m]));
-let state = { loc: null, variable: "temperature_c", tz: "UTC", locTz: "UTC" };
+let state = { loc: null, variable: "temperature_c", tz: "local", locTz: "UTC" };
 
 const $ = s => document.querySelector(s);
 const tip = $("#tip");
