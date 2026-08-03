@@ -18,6 +18,9 @@ class TimescaleStore:
             conninfo=settings.database_url,
             min_size=1,
             max_size=5,
+            # Validate/reconnect a pooled connection before handing it out, so a
+            # DB restart (or a long-idle connection) doesn't fail the next write.
+            check=ConnectionPool.check_connection,
             kwargs={"row_factory": dict_row},
         )
 
