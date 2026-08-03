@@ -52,7 +52,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Services: TimescaleDB `:5432`, MinIO `:9000` (console `:9001`), Prefect `:4200`.
+Services: TimescaleDB `:5432`, MinIO `:9000` (console `:9001`), Prefect `:4200`, and the **API + dashboard** `:8000` (containerized `meteo-api`, `restart: unless-stopped`). All core services auto-recover on reboot. `meteo-serve` still runs the API on the host for dev (stop the container first to free `:8000`).
 
 ### 2. Python environment
 

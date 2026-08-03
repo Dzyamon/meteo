@@ -59,6 +59,24 @@ services:
     volumes:
       - prefect_data:/root/.prefect
 
+  # FastAPI serving layer + dashboard (http://localhost:8000). Reads the DB only,
+  # so no MinIO/GRIB deps. restart: unless-stopped -> survives reboots like the rest.
+  meteo-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: meteo-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://meteo:meteo@timescaledb:5432/meteo
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
 volumes:
   timescale_data:
   minio_data:
