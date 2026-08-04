@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from herbie import Herbie
 
@@ -19,18 +19,20 @@ logger = logging.getLogger(__name__)
 
 PRODUCT = "pgrb2.0p25"  # GFS 0.25-degree global grid
 
-# GRIB .idx search strings -> the single variable Herbie hands back per call.
-# Wind is fetched as U/V components and combined into speed + direction.
-_SCALAR_SEARCH = {
-    "temperature_c": "TMP:2 m above ground",
-    "humidity_pct": "RH:2 m above ground",
-    "pressure_hpa": "PRES:surface",
-    "precipitation_mm": "APCP:surface",
-    "cloud_cover_pct": "TCDC:entire atmosphere",
-}
-_SCALAR_CONVERT = {
-    "temperature_c": kelvin_to_celsius,
-    "pressure_hpa": pa_to_hpa,
+# One combined .idx search pulls every field we need per horizon in a single
+# request (Herbie returns a list of datasets, one per level type).
+_COMBINED_SEARCH = (
+    ":(TMP:2 m above ground|RH:2 m above ground|PRES:surface|APCP:surface"
+    "|TCDC:entire atmosphere|UGRD:10 m above ground|VGRD:10 m above ground):"
+)
+
+# cfgrib short name -> (our field, unit converter or None)
+_VARMAP = {
+    "t2m": ("temperature_c", kelvin_to_celsius),
+    "r2": ("humidity_pct", None),
+    "sp": ("pressure_hpa", pa_to_hpa),
+    "tp": ("precipitation_mm", None),
+    "tcc": ("cloud_cover_pct", None),
 }
 
 
@@ -41,42 +43,6 @@ def latest_run_time(now: datetime, lag_hours: int = 5) -> datetime:
     return anchor.replace(hour=cycle_hour, minute=0, second=0, microsecond=0)
 
 
-def _point_value(dataset, latitude: float, longitude: float) -> float | None:
-    """Nearest grid cell value of a Herbie variable subset.
-
-    Herbie returns a *list* of datasets when cfgrib opens multiple hypercubes
-    (e.g. TCDC matches several 'entire atmosphere' layers); take the first
-    dataset that yields a finite value.
-    """
-    datasets = dataset if isinstance(dataset, list) else [dataset]
-    for ds in datasets:
-        data_vars = list(ds.data_vars)
-        if not data_vars:
-            continue
-        try:
-            selected = ds[data_vars[0]].sel(
-                latitude=latitude,
-                longitude=to_gfs_longitude(longitude),
-                method="nearest",
-            )
-            value = float(selected.values)
-        except Exception:  # noqa: BLE001 - try the next hypercube
-            continue
-        if value == value:  # not NaN
-            return value
-    return None
-
-
-def _open(run_time: datetime, fxx: int, search: str):
-    herbie = Herbie(
-        run_time.strftime("%Y-%m-%d %H:%M"),
-        model="gfs",
-        product=PRODUCT,
-        fxx=fxx,
-    )
-    return herbie.xarray(search)
-
-
 def _resolve_run(now: datetime, max_steps_back: int = 2) -> datetime:
     """Find the newest cycle whose f001 file actually exists, stepping back 6h at a time."""
     run_time = latest_run_time(now)
@@ -84,10 +50,83 @@ def _resolve_run(now: datetime, max_steps_back: int = 2) -> datetime:
         try:
             Herbie(run_time.strftime("%Y-%m-%d %H:%M"), model="gfs", product=PRODUCT, fxx=1).grib
             return run_time
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.warning("GFS run %s not available yet, stepping back 6h", run_time.isoformat())
             run_time = run_time - timedelta(hours=6)
     return run_time
+
+
+def _collect_vars(result) -> dict:
+    """Flatten Herbie's list-of-datasets into {cfgrib_short_name: DataArray}."""
+    datasets = result if isinstance(result, list) else [result]
+    out: dict = {}
+    for ds in datasets:
+        for name in ds.data_vars:
+            out.setdefault(name, ds[name])  # first wins (e.g. tcc has two layers)
+    return out
+
+
+def _point(da, latitude: float, longitude: float) -> float | None:
+    if da is None:
+        return None
+    try:
+        value = float(da.sel(latitude=latitude, longitude=to_gfs_longitude(longitude), method="nearest").values)
+    except Exception:  # noqa: BLE001
+        return None
+    return None if value != value else value  # drop NaN
+
+
+def fetch_forecasts(
+    locations: list[Location],
+    now: datetime,
+    forecast_hours: int,
+    model: str = "gfs",
+) -> tuple[datetime, dict[str, list[NwpForecastRow]]]:
+    """Fetch a GFS forecast series for every location at once.
+
+    Each horizon is downloaded ONCE (all variables in one request) and every
+    location's nearest grid cell is extracted from it — so wall time no longer
+    scales with variables-per-horizon or with the number of locations.
+    """
+    run_time = _resolve_run(now)
+    rows: dict[str, list[NwpForecastRow]] = {loc.id: [] for loc in locations}
+
+    for fxx in range(1, forecast_hours + 1):
+        valid_time = run_time + timedelta(hours=fxx)
+        try:
+            herbie = Herbie(run_time.strftime("%Y-%m-%d %H:%M"), model="gfs", product=PRODUCT, fxx=fxx)
+            fields = _collect_vars(herbie.xarray(_COMBINED_SEARCH, remove_grib=True))
+        except Exception as exc:  # noqa: BLE001 - a bad horizon must not drop the whole run
+            logger.warning("GFS f%03d fetch failed: %s", fxx, exc)
+            continue
+
+        for loc in locations:
+            scalars = {}
+            for short, (field, convert) in _VARMAP.items():
+                raw = _point(fields.get(short), loc.latitude, loc.longitude)
+                scalars[field] = convert(raw) if convert else raw
+            u = _point(fields.get("u10"), loc.latitude, loc.longitude)
+            v = _point(fields.get("v10"), loc.latitude, loc.longitude)
+            rows[loc.id].append(
+                NwpForecastRow(
+                    run_time=run_time,
+                    valid_time=valid_time,
+                    location_id=loc.id,
+                    model=model,
+                    horizon_hours=fxx,
+                    temperature_c=scalars["temperature_c"],
+                    precipitation_mm=scalars["precipitation_mm"],
+                    wind_speed_ms=wind_speed(u, v),
+                    wind_direction_deg=wind_direction(u, v),
+                    humidity_pct=scalars["humidity_pct"],
+                    pressure_hpa=scalars["pressure_hpa"],
+                    cloud_cover_pct=scalars["cloud_cover_pct"],
+                )
+            )
+
+    total = sum(len(v) for v in rows.values())
+    logger.info("Fetched %s GFS rows across %s location(s) (run %s)", total, len(locations), run_time.isoformat())
+    return run_time, rows
 
 
 def fetch_forecast(
@@ -96,46 +135,6 @@ def fetch_forecast(
     forecast_hours: int,
     model: str = "gfs",
 ) -> tuple[datetime, list[NwpForecastRow]]:
-    """Fetch a GFS forecast series for one location, extracted at its grid cell."""
-    run_time = _resolve_run(now)
-    rows: list[NwpForecastRow] = []
-
-    for fxx in range(1, forecast_hours + 1):
-        valid_time = run_time + timedelta(hours=fxx)
-        values: dict[str, float | None] = {}
-
-        for field, search in _SCALAR_SEARCH.items():
-            try:
-                raw = _point_value(_open(run_time, fxx, search), location.latitude, location.longitude)
-                convert = _SCALAR_CONVERT.get(field)
-                values[field] = convert(raw) if convert else raw
-            except Exception as exc:  # noqa: BLE001 - a missing field must not drop the horizon
-                logger.debug("GFS %s f%03d %s unavailable: %s", location.id, fxx, field, exc)
-                values[field] = None
-
-        try:
-            u = _point_value(_open(run_time, fxx, "UGRD:10 m above ground"), location.latitude, location.longitude)
-            v = _point_value(_open(run_time, fxx, "VGRD:10 m above ground"), location.latitude, location.longitude)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("GFS %s f%03d wind unavailable: %s", location.id, fxx, exc)
-            u = v = None
-
-        rows.append(
-            NwpForecastRow(
-                run_time=run_time,
-                valid_time=valid_time,
-                location_id=location.id,
-                model=model,
-                horizon_hours=fxx,
-                temperature_c=values["temperature_c"],
-                precipitation_mm=values["precipitation_mm"],
-                wind_speed_ms=wind_speed(u, v),
-                wind_direction_deg=wind_direction(u, v),
-                humidity_pct=values["humidity_pct"],
-                pressure_hpa=values["pressure_hpa"],
-                cloud_cover_pct=values["cloud_cover_pct"],
-            )
-        )
-
-    logger.info("Fetched %s GFS horizons for %s (run %s)", len(rows), location.id, run_time.isoformat())
-    return run_time, rows
+    """Single-location convenience wrapper around fetch_forecasts."""
+    run_time, rows = fetch_forecasts([location], now, forecast_hours, model)
+    return run_time, rows[location.id]
