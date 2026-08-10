@@ -15,16 +15,22 @@ _VARS = {
     "precipitation_mm": ("precip_mae", "precip_n"),
 }
 MIN_SCORED = 10  # don't crown a champion on a handful of points
+MIN_CHAMPION_HORIZON = 24  # a champion must forecast at least this far ahead
+                           # (keeps short-range nowcasters from winning on easy horizons)
 
 
 def select_location(location_id: str, db: TimescaleStore, hours: int = 336) -> list[dict]:
     """Pick the lowest-MAE model_version per variable and persist it."""
     scores = db.evaluate_models(location_id, since_hours=hours)
+    coverage = db.fetch_model_max_horizon(location_id)
+    eligible = {mv for mv, h in coverage.items() if (h or 0) >= MIN_CHAMPION_HORIZON}
     now = datetime.now(timezone.utc)
     champions: list[dict] = []
     for variable, (mae_field, n_field) in _VARS.items():
         best = None
         for row in scores:
+            if row["model_version"] not in eligible:
+                continue  # skip short-range models (fair comparison across full horizon)
             mae, n = row[mae_field], row[n_field]
             if mae is None or (n or 0) < MIN_SCORED:
                 continue

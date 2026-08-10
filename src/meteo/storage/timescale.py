@@ -421,6 +421,20 @@ class TimescaleStore:
             conn.commit()
         return len(rows)
 
+    def fetch_model_max_horizon(self, location_id: str, since_hours: int = 48) -> dict:
+        """Max forecast horizon each model_version currently provides — used to keep
+        short-range models (e.g. a 6h nowcaster) out of full-forecast champion picks."""
+        sql = """
+            SELECT model_version, MAX(horizon_hours) AS max_h
+            FROM predictions
+            WHERE location_id = %s AND created_at >= NOW() - (%s * INTERVAL '1 hour')
+            GROUP BY model_version
+        """
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (location_id, since_hours))
+                return {r["model_version"]: r["max_h"] for r in cur.fetchall()}
+
     def fetch_champions(self, location_id: str) -> list[dict]:
         sql = "SELECT * FROM model_champions WHERE location_id = %s ORDER BY variable"
         with self.connection() as conn:
