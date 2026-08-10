@@ -3,7 +3,10 @@ from __future__ import annotations
 import logging
 
 import numpy as np
-from lightgbm import LGBMRegressor
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import RidgeCV
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 from meteo.config import get_settings, load_locations
 from meteo.storage.timescale import TimescaleStore
@@ -22,15 +25,21 @@ MIN_VAL_SAMPLES = 20
 MIN_ENSEMBLE_SAMPLES = 100
 
 
-def _fit(x: np.ndarray, y: np.ndarray) -> LGBMRegressor:
-    model = LGBMRegressor(
-        n_estimators=250,
-        learning_rate=0.05,
-        num_leaves=15,  # few members -> keep it shallow to avoid overfitting
-        min_child_samples=20,
-        subsample=0.8,
-        colsample_bytree=0.9,
-        verbose=-1,
+def _fit(x: np.ndarray, y: np.ndarray):
+    """Linear stacking: a regularized weighted blend of the member forecasts.
+
+    Unlike a tree model this extrapolates — it follows the diurnal cycle beyond
+    the training range instead of collapsing to a flat mean — and is stable with
+    few samples. Missing members are mean-imputed (keeping all columns so the
+    feature width is identical at train and predict time).
+    """
+    # The members are highly collinear (all forecasting the same variable), so a
+    # fixed small alpha yields large opposing weights that extrapolate badly.
+    # RidgeCV auto-selects strong-enough regularization to keep the blend stable.
+    model = make_pipeline(
+        SimpleImputer(strategy="mean", keep_empty_features=True),
+        StandardScaler(),
+        RidgeCV(alphas=(0.1, 1.0, 10.0, 100.0, 1000.0)),
     )
     model.fit(x, y)
     return model
