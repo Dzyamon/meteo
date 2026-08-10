@@ -202,7 +202,7 @@ async function render() {
     ...MODELS.map(m => getJSON(`/predict/${state.loc}?model_version=${m.id}`)),
   ]);
   renderTiles(champs);
-  renderForecast(series);
+  renderForecast(series, champs);
   renderLeaderboard(evalData);
 }
 
@@ -223,22 +223,26 @@ function renderTiles(champs) {
 }
 
 // ---- forecast line chart (future horizons only) ----
-function renderForecast(series) {
+function renderForecast(series, champs) {
   const key = state.variable, unit = VARS[state.variable].unit;
   const now = Date.now();
+  const champVer = champs && champs.champions && champs.champions[state.variable]
+    ? champs.champions[state.variable].model_version : null;
   const lines = [];
-  MODELS.filter(m => m.inLine).forEach((m, i) => {
+  // Plot the usual set, plus the champion for this variable even if it isn't
+  // normally on the line chart (e.g. the baseline).
+  MODELS.filter(m => m.inLine || m.id === champVer).forEach((m) => {
     const data = series[MODELS.indexOf(m)];
     if (!data || !data.predictions) return;
     const pts = data.predictions
       .map(p => ({ t: Date.parse(p.valid_time), v: p[key] }))
       .filter(p => p.v != null && p.t > now)
       .sort((a, b) => a.t - b.t);
-    if (pts.length) lines.push({ ...m, pts });
+    if (pts.length) lines.push({ ...m, pts, champion: m.id === champVer });
   });
   const legend = $("#fc-legend");
   legend.innerHTML = lines.map(l =>
-    `<span><span class="swatch" style="background:${l.color};${l.dashed ? "opacity:.6" : ""}"></span>${l.label}</span>`).join("");
+    `<span><span class="swatch" style="background:${l.color};${l.dashed && !l.champion ? "opacity:.6" : ""}"></span>${l.label}${l.champion ? " ★ champion" : ""}</span>`).join("");
   const host = $("#fc-chart"), sub = $("#fc-sub");
   if (!lines.length) { sub.textContent = ""; host.innerHTML = `<div class="empty">No forecast data for this variable yet.</div>`; return; }
   const allPts = lines.flatMap(l => l.pts);
@@ -283,9 +287,11 @@ function lineChart(lines, unit) {
   let paths = "", labels = "";
   lines.forEach(l => {
     const d = l.pts.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
-    paths += `<path d="${d}" fill="none" stroke="${l.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" ${l.dashed ? 'stroke-dasharray="5 4" opacity=".75"' : ""}/>`;
+    const width = l.champion ? 3.5 : 2;
+    const dash = l.dashed && !l.champion ? 'stroke-dasharray="5 4" opacity=".75"' : "";
+    paths += `<path d="${d}" fill="none" stroke="${l.color}" stroke-width="${width}" stroke-linejoin="round" stroke-linecap="round" ${dash}/>`;
     const last = l.pts[l.pts.length - 1];
-    labels += `<text class="endlbl" x="${x(last.t) + 6}" y="${y(last.v) + 4}" fill="${l.color}">${last.v.toFixed(1)}</text>`;
+    labels += `<text class="endlbl" x="${x(last.t) + 6}" y="${y(last.v) + 4}" fill="${l.color}"${l.champion ? ' font-weight="700"' : ""}>${last.v.toFixed(1)}</text>`;
   });
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Forecast comparison">
     ${g}<line class="axis-line" x1="${m.l}" y1="${H - m.b}" x2="${W - m.r}" y2="${H - m.b}"/>
