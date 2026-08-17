@@ -21,7 +21,10 @@ class TimescaleStore:
             # Validate/reconnect a pooled connection before handing it out, so a
             # DB restart (or a long-idle connection) doesn't fail the next write.
             check=ConnectionPool.check_connection,
-            kwargs={"row_factory": dict_row},
+            # prepare_threshold=None disables server-side prepared statements —
+            # required behind a transaction-mode pooler (Supabase Supavisor /
+            # pgbouncer), which would otherwise raise DuplicatePreparedStatement.
+            kwargs={"row_factory": dict_row, "prepare_threshold": None},
         )
 
     @contextmanager
