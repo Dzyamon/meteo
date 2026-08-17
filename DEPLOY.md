@@ -121,9 +121,12 @@ Check Vercel → Cron logs that `fetch`/`train` runs return 200.
 ## Part 6 — Limits, caveats, cost
 
 - **Free tiers:** Supabase free (500 MB DB, pauses after ~1 week idle — the crons
-  keep it active) and Vercel Hobby cover a single location comfortably. **Cron on
-  Hobby is limited** (few jobs, coarse cadence); 6-hourly fetch wants Vercel **Pro**,
-  or use Supabase `pg_cron` instead.
+  keep it active) and Vercel Hobby cover a single location comfortably. **Hobby cron
+  runs at most once per day** — `vercel.json` ships with **daily** fetch/train so it
+  deploys on the free tier. For fresher (6-hourly) updates without upgrading, trigger
+  `/cron/fetch` from an **external scheduler** (GitHub Actions cron or cron-job.org)
+  or Supabase `pg_cron` + `pg_net`; both bypass Vercel's cron limit. Or upgrade to
+  Vercel **Pro** and set the schedule back to `30 5,11,17,23 * * *`.
 - **Function duration:** Open-Meteo fetches (~1s) and Ridge training (seconds) fit the
   60s budget easily. This is *only* possible because there's no GRIB fetch.
 - **LightGBM bundle size:** the bias-correction still uses LightGBM; verify its wheel
