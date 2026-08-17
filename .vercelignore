@@ -1,0 +1,18 @@
+# Keep the Vercel (serving) deployment lean. Excluding pyproject.toml forces the
+# Python builder to install ONLY requirements.txt (fastapi/psycopg/…), not the
+# full ML stack from pyproject (lightgbm/sklearn/scipy/polars/prefect) — which
+# blows past the function size limit. The heavy pipeline runs on GitHub Actions.
+pyproject.toml
+requirements-pipeline.txt
+
+# Container / dev-only, never needed by the serving function
+.venv/
+data/
+models/
+grafana/
+scripts/
+.github/
+Dockerfile*
+docker-compose*.yml
+*.md
+prefect.yaml
