@@ -1,4 +1,11 @@
-CREATE EXTENSION IF NOT EXISTS timescaledb;
+-- Portable schema: works on TimescaleDB (container) and plain Postgres (Supabase).
+-- The hypertable calls are optional accelerations — guarded so a missing
+-- timescaledb extension is a no-op, leaving standard tables that behave the same.
+DO $$ BEGIN
+    CREATE EXTENSION IF NOT EXISTS timescaledb;
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'timescaledb unavailable — using plain tables';
+END $$;
 
 -- Silver: cleaned observations aligned to location + timestamp
 CREATE TABLE IF NOT EXISTS observations (
@@ -15,7 +22,8 @@ CREATE TABLE IF NOT EXISTS observations (
     PRIMARY KEY (time, location_id, source)
 );
 
-SELECT create_hypertable('observations', 'time', if_not_exists => TRUE);
+DO $$ BEGIN PERFORM create_hypertable('observations', 'time', if_not_exists => TRUE);
+EXCEPTION WHEN undefined_function THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_observations_location_time
     ON observations (location_id, time DESC);
@@ -41,7 +49,8 @@ CREATE TABLE IF NOT EXISTS features (
     PRIMARY KEY (time, location_id)
 );
 
-SELECT create_hypertable('features', 'time', if_not_exists => TRUE);
+DO $$ BEGIN PERFORM create_hypertable('features', 'time', if_not_exists => TRUE);
+EXCEPTION WHEN undefined_function THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_features_location_time
     ON features (location_id, time DESC);
@@ -63,7 +72,8 @@ CREATE TABLE IF NOT EXISTS nwp_forecasts (
     PRIMARY KEY (run_time, valid_time, location_id, model)
 );
 
-SELECT create_hypertable('nwp_forecasts', 'run_time', if_not_exists => TRUE);
+DO $$ BEGIN PERFORM create_hypertable('nwp_forecasts', 'run_time', if_not_exists => TRUE);
+EXCEPTION WHEN undefined_function THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_nwp_location_valid
     ON nwp_forecasts (location_id, model, valid_time DESC);
@@ -81,7 +91,8 @@ CREATE TABLE IF NOT EXISTS predictions (
     PRIMARY KEY (created_at, location_id, horizon_hours, model_version)
 );
 
-SELECT create_hypertable('predictions', 'created_at', if_not_exists => TRUE);
+DO $$ BEGIN PERFORM create_hypertable('predictions', 'created_at', if_not_exists => TRUE);
+EXCEPTION WHEN undefined_function THEN NULL; END $$;
 
 -- Champion model per (location, variable): the best model_version chosen by
 -- out-of-sample scoring, used to serve the "best-available" forecast.
@@ -94,6 +105,14 @@ CREATE TABLE IF NOT EXISTS model_champions (
     window_hours  INTEGER,
     evaluated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (location_id, variable)
+);
+
+-- Trained model artifacts (joblib bytes), for the serverless model_store="db"
+-- option where local disk is ephemeral.
+CREATE TABLE IF NOT EXISTS model_artifacts (
+    key        TEXT PRIMARY KEY,
+    data       BYTEA NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Alerts fired by the streaming alert service
@@ -111,7 +130,8 @@ CREATE TABLE IF NOT EXISTS alerts (
     PRIMARY KEY (triggered_at, id)
 );
 
-SELECT create_hypertable('alerts', 'triggered_at', if_not_exists => TRUE);
+DO $$ BEGIN PERFORM create_hypertable('alerts', 'triggered_at', if_not_exists => TRUE);
+EXCEPTION WHEN undefined_function THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_alerts_location_time
     ON alerts (location_id, triggered_at DESC);

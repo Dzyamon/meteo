@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     database_url: str = "postgresql://meteo:meteo@localhost:5432/meteo"
+    # Connection-pool sizing. Serverless (Vercel + Supabase pooler) wants tiny,
+    # short-lived pools: DB_POOL_MIN_SIZE=0, DB_POOL_MAX_SIZE=1.
+    db_pool_min_size: int = 1
+    db_pool_max_size: int = 5
+    # Where trained models live: "disk" (container, MODEL_DIR) or "db" (a bytea
+    # table — the serverless-safe option, since serverless disk is ephemeral).
+    model_store: str = "disk"
+    # Shared secret Vercel Cron sends as `Authorization: Bearer <secret>`.
+    cron_secret: str = ""
     minio_endpoint: str = "http://localhost:9000"
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"

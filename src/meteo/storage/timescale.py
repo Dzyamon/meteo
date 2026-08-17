@@ -16,8 +16,8 @@ class TimescaleStore:
         settings = get_settings()
         self._pool = ConnectionPool(
             conninfo=settings.database_url,
-            min_size=1,
-            max_size=5,
+            min_size=settings.db_pool_min_size,
+            max_size=settings.db_pool_max_size,
             # Validate/reconnect a pooled connection before handing it out, so a
             # DB restart (or a long-idle connection) doesn't fail the next write.
             check=ConnectionPool.check_connection,
@@ -441,6 +441,24 @@ class TimescaleStore:
             with conn.cursor() as cur:
                 cur.execute(sql, (location_id,))
                 return cur.fetchall()
+
+    def save_model_artifact(self, key: str, data: bytes) -> None:
+        sql = """
+            INSERT INTO model_artifacts (key, data, updated_at)
+            VALUES (%s, %s, NOW())
+            ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+        """
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (key, data))
+            conn.commit()
+
+    def load_model_artifact(self, key: str) -> bytes | None:
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT data FROM model_artifacts WHERE key = %s", (key,))
+                row = cur.fetchone()
+        return bytes(row["data"]) if row else None
 
     def close(self) -> None:
         self._pool.close()

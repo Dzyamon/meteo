@@ -1,26 +1,17 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-import joblib
-
-from meteo.config import get_settings
+from meteo_model import model_store
 
 
-def model_path(location_id: str, target: str) -> Path:
-    settings = get_settings()
-    return settings.model_dir / location_id / f"gfs_correction_{target}.pkl"
+def _key(location_id: str, target: str) -> str:
+    return f"{location_id}/gfs_correction_{target}"
 
 
-def save_model(location_id: str, target: str, bundle: dict) -> Path:
-    path = model_path(location_id, target)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(bundle, path)
-    return path
+def save_model(location_id: str, target: str, bundle: dict) -> str:
+    key = _key(location_id, target)
+    model_store.save(key, bundle)
+    return key
 
 
 def load_model(location_id: str, target: str) -> dict | None:
-    path = model_path(location_id, target)
-    if not path.exists():
-        return None
-    return joblib.load(path)
+    return model_store.load(_key(location_id, target))

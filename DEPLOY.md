@@ -32,56 +32,27 @@ Prefect worker, no container that has to stay running.
 
 ---
 
-## Part 0 — Required code adaptations (small, one-time)
+## Part 0 — Serverless scaffolding (already in the repo)
 
-The repo is container-first; a few changes make it serverless-ready. Do these on a
-deploy branch:
+This branch is serverless-ready — no code changes needed, just env vars (Part 3):
 
-1. **GFS from Open-Meteo.** No code change needed beyond config — set the env var
-   (Part 2). `ai_pipeline` already fetches any Open-Meteo model via
-   `openmeteo_models`; adding `gfs_seamless:gfs` makes it write `nwp_forecasts(model='gfs')`
-   + `predictions('gfs_raw')`, which the existing correction/ensemble/champion code
-   consumes unchanged. **Do not run** `meteo-model-fetch` (the GRIB path).
-2. **Guard the hypertable calls.** Supabase may not have `timescaledb`. In
-   `scripts/init_db.sql`, the tables are standard Postgres; run the `CREATE TABLE`
-   statements and simply skip the `SELECT create_hypertable(...)` lines (or wrap them
-   so a missing extension is non-fatal). Everything works as plain tables.
-3. **Connection pooling for serverless.** Point `DATABASE_URL` at Supabase's
-   **pooler** (Supavisor, transaction mode, port `6543`), and keep pool sizes tiny —
-   in `TimescaleStore` set `min_size=0, max_size=1` (each invocation is ephemeral).
-4. **A Vercel entrypoint for FastAPI** — `api/index.py`:
-   ```python
-   from meteo.api.main import app  # Vercel's Python runtime serves this ASGI app
-   ```
-5. **Cron handler functions** (thin wrappers Vercel Cron can hit) — e.g. `api/cron/fetch.py`
-   and `api/cron/train.py`:
-   ```python
-   # api/cron/fetch.py  -> fetch all Open-Meteo models, then re-correct
-   from meteo_model.ai_pipeline import run_cycle as fetch_all
-   from meteo_model.correct.predict import predict_all
-   def handler(request):
-       fetch_all(); predict_all()
-       return {"statusCode": 200, "body": "ok"}
-   ```
-   ```python
-   # api/cron/train.py  -> retrain correction + ensemble, re-select champions
-   from meteo_model.correct.train import train_all as corr_train
-   from meteo_model.ensemble.train import train_all as ens_train
-   from meteo_model.ensemble.predict import predict_all as ens_predict
-   from meteo_model.champion import select_all
-   def handler(request):
-       corr_train(); ens_train(); ens_predict(); select_all()
-       return {"statusCode": 200, "body": "ok"}
-   ```
-   (Exact handler signature follows Vercel's current Python runtime docs.)
-6. **Model persistence.** Trained models are written to `MODEL_DIR` (local disk),
-   which is ephemeral on serverless. Store them in **Supabase Storage** instead (a
-   small change to `correct/storage.py` / `ensemble/storage.py` to read/write the
-   bucket), or fold prediction into the train job so a model is used in the same
-   invocation it's trained. Simplest: the daily `train` cron trains **and** predicts
-   in one run, so nothing needs to persist between invocations.
-
-> Item 6 is the only non-trivial one; the rest are config or ~3-line files.
+- **`api/index.py`** — Vercel Python entrypoint exposing the FastAPI ASGI `app`.
+- **`vercel.json`** — rewrites every path to that function, plus the two Cron jobs.
+- **`/cron/fetch` and `/cron/train`** endpoints in the API (lazy-imported so serving
+  stays light), protected by `CRON_SECRET`. `fetch` pulls the Open-Meteo models and
+  re-corrects; `train` retrains correction + ensemble and re-selects champions.
+- **GFS via Open-Meteo** — set `OPENMETEO_MODELS=...,gfs_seamless:gfs`; `ai_pipeline`
+  writes `nwp_forecasts(model='gfs')` + `predictions('gfs_raw')`, consumed by the
+  existing correction/ensemble/champion code unchanged. (The GRIB path is simply not
+  invoked.)
+- **DB-backed model store** — `MODEL_STORE=db` persists trained models as bytes in a
+  `model_artifacts` table, so they survive across stateless invocations (serverless
+  disk is ephemeral). `MODEL_STORE=disk` (default) keeps the container behaviour.
+- **Portable schema** — `scripts/init_db.sql` guards the `create_hypertable` calls, so
+  it runs on plain Supabase Postgres and on TimescaleDB alike.
+- **Tiny pools** — `DB_POOL_MIN_SIZE`/`DB_POOL_MAX_SIZE` env vars; set `0`/`1` for the
+  serverless + Supabase-pooler pattern.
+- **`requirements.txt`** — the lean runtime subset (no prefect/polars/kafka/GRIB).
 
 ---
 
@@ -117,9 +88,12 @@ deploy branch:
 ```
 DATABASE_URL=postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:6543/postgres
 OPENMETEO_MODELS=ecmwf_aifs025_single:aifs,icon_seamless:icon,gfs_seamless:gfs
+MODEL_STORE=db                  # persist models in Postgres (serverless-safe)
+DB_POOL_MIN_SIZE=0
+DB_POOL_MAX_SIZE=1
+CRON_SECRET=<a long random string>   # Vercel sends it; the /cron endpoints verify it
 NWP_FORECAST_HOURS=48
-USE_LOCAL_BRONZE=false          # or point MINIO_* at Supabase Storage's S3 endpoint
-MODEL_DIR=/tmp/models           # ephemeral; see Part 0 item 6
+USE_LOCAL_BRONZE=true            # simplest; or set false + MINIO_* for Supabase Storage
 BIAS_CORRECTION_MIN_SAMPLES=300
 ```
 

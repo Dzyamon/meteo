@@ -1,0 +1,15 @@
+{
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 60,
+      "includeFiles": "{src,config}/**"
+    }
+  },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/index" }
+  ],
+  "crons": [
+    { "path": "/cron/fetch", "schedule": "30 5,11,17,23 * * *" },
+    { "path": "/cron/train", "schedule": "0 6 * * *" }
+  ]
+}

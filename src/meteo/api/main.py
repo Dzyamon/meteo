@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 
-from meteo.config import load_locations
+from meteo.config import get_settings, load_locations
 from meteo.storage.timescale import TimescaleStore
 
 app = FastAPI(title="Meteo Nowcasting API", version="0.1.0")
@@ -202,6 +202,41 @@ def latest_observation(location_id: str) -> dict:
         return rows[-1]
     finally:
         db.close()
+
+
+def _check_cron(authorization: str | None) -> None:
+    """Reject cron requests without the shared secret (when one is configured)."""
+    secret = get_settings().cron_secret
+    if secret and authorization != f"Bearer {secret}":
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
+@app.get("/cron/fetch", include_in_schema=False)
+def cron_fetch(authorization: str | None = Header(default=None)) -> dict:
+    """Vercel Cron: pull the Open-Meteo models (gfs/aifs/icon) and re-correct."""
+    _check_cron(authorization)
+    from meteo_model.ai_pipeline import run_cycle
+    from meteo_model.correct.predict import predict_all
+
+    fetched = run_cycle()
+    corrected = predict_all()
+    return {"fetched": fetched, "corrected": corrected}
+
+
+@app.get("/cron/train", include_in_schema=False)
+def cron_train(authorization: str | None = Header(default=None)) -> dict:
+    """Vercel Cron: retrain correction + ensemble, then re-select champions."""
+    _check_cron(authorization)
+    from meteo_model.champion import select_all
+    from meteo_model.correct.train import train_all as correction_train
+    from meteo_model.ensemble.predict import predict_all as ensemble_predict
+    from meteo_model.ensemble.train import train_all as ensemble_train
+
+    correction = correction_train()
+    ensemble = ensemble_train()
+    ens_pred = ensemble_predict()
+    champions = select_all()
+    return {"correction": correction, "ensemble": ensemble, "ensemble_predict": ens_pred, "champions": champions}
 
 
 def serve() -> None:

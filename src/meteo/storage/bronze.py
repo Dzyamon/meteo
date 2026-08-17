@@ -4,9 +4,6 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-import boto3
-from botocore.client import Config
-
 from meteo.config import get_settings
 
 
@@ -16,6 +13,9 @@ class BronzeStore:
     def __init__(self) -> None:
         self.settings = get_settings()
         if not self.settings.use_local_bronze:
+            import boto3  # optional: only when writing to S3/MinIO
+            from botocore.client import Config
+
             self._s3 = boto3.client(
                 "s3",
                 endpoint_url=self.settings.minio_endpoint,
