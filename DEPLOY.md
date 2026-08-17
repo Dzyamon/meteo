@@ -1,9 +1,14 @@
 # Deploy — fully managed on Vercel + Supabase (Open-Meteo everywhere)
 
-A **serverless, zero-VM** deployment: Supabase hosts Postgres (+ optional Storage),
-Vercel hosts the API/dashboard and runs the scheduled jobs via Cron. **Every model
-is pulled from the Open-Meteo API** (GFS, AIFS, ICON) — no GRIB, no `eccodes`, no
-Prefect worker, no container that has to stay running.
+A **serverless, zero-VM** deployment split across three free services:
+- **Supabase** — Postgres (+ optional Storage).
+- **Vercel** — the API + dashboard only (a tiny, read-only bundle).
+- **GitHub Actions** — the scheduled pipeline (fetch / correct / train). The ML stack
+  (numpy/scipy/sklearn/lightgbm) is far too big for a Vercel function, and Actions
+  runners have no size limit and free cron — so the heavy work lives there.
+
+**Every model is pulled from the Open-Meteo API** (GFS via `gfs_seamless`, AIFS, ICON)
+— no GRIB, no `eccodes`, no Prefect worker, no container that has to stay running.
 
 > This trades the raw-grid GFS pipeline (Approach 3's GRIB extraction) for
 > Open-Meteo's point forecasts. For point predictions the values are equivalent;
@@ -12,12 +17,13 @@ Prefect worker, no container that has to stay running.
 > Exited" problem disappears.
 
 ```
-                 ┌──────────── Vercel ────────────┐
- Open-Meteo API →│ Cron: fetch (6h)  → functions  │→ Supabase Postgres
- (gfs/aifs/icon) │ Cron: train (1/day)            │      ▲
-                 │ FastAPI /forecast /eval /best   │──────┘ (read)
-                 │ static dashboard  (/)           │
-                 └────────────────────────────────┘
+ GitHub Actions (cron)                    Vercel
+ ┌───────────────────────┐        ┌────────────────────────┐
+ │ fetch+correct  (6h)   │        │ FastAPI /forecast /eval │
+ │ train+champion (1/day)│──┐  ┌──│ /best   +  dashboard /  │
+ └───────────────────────┘  ▼  ▼  └────────────────────────┘
+ Open-Meteo API ─────────► Supabase Postgres ◄─── (read)
+ (gfs/aifs/icon)           (obs, predictions, model_artifacts)
 ```
 
 ## What changes vs. the container stack
@@ -27,7 +33,7 @@ Prefect worker, no container that has to stay running.
 | TimescaleDB container | **Supabase Postgres** (plain tables — hypertables optional) |
 | MinIO bronze | **Supabase Storage** (S3) — or disable bronze |
 | GFS via GRIB (`meteo-model-worker`, eccodes) | **GFS via Open-Meteo** (`gfs_seamless`) — a JSON call |
-| Prefect server + worker + cron | **Vercel Cron** → serverless function endpoints |
+| Prefect server + worker + cron | **GitHub Actions** cron running the pipeline modules |
 | `meteo-serve` container | **Vercel Python serverless** (FastAPI) + static dashboard |
 
 ---
@@ -37,10 +43,16 @@ Prefect worker, no container that has to stay running.
 This branch is serverless-ready — no code changes needed, just env vars (Part 3):
 
 - **`api/index.py`** — Vercel Python entrypoint exposing the FastAPI ASGI `app`.
-- **`vercel.json`** — rewrites every path to that function, plus the two Cron jobs.
-- **`/cron/fetch` and `/cron/train`** endpoints in the API (lazy-imported so serving
-  stays light), protected by `CRON_SECRET`. `fetch` pulls the Open-Meteo models and
-  re-corrects; `train` retrains correction + ensemble and re-selects champions.
+- **`vercel.json`** — rewrites every path to that function (no crons: scheduling is on
+  GitHub Actions).
+- **`.github/workflows/pipeline.yml`** — the scheduler: `fetch + correct` every 6h and
+  `train + champion` daily, running the pipeline modules against Supabase. Uses the
+  `requirements-pipeline.txt` (full ML stack) — no Vercel size limit applies here.
+- **`requirements.txt` vs `requirements-pipeline.txt`** — Vercel installs only the
+  lean serving deps (fastapi/psycopg/pydantic/httpx); the heavy ML deps are pipeline-only.
+- **`/cron/fetch` and `/cron/train`** endpoints also exist in the API (lazy-imported,
+  `CRON_SECRET`-guarded) — usable if you later run on Vercel **Pro** with the full deps,
+  but the free path uses GitHub Actions instead.
 - **GFS via Open-Meteo** — set `OPENMETEO_MODELS=...,gfs_seamless:gfs`; `ai_pipeline`
   writes `nwp_forecasts(model='gfs')` + `predictions('gfs_raw')`, consumed by the
   existing correction/ensemble/champion code unchanged. (The GRIB path is simply not
@@ -63,27 +75,42 @@ This branch is serverless-ready — no code changes needed, just env vars (Part 
 2. Apply the schema (tables only). From the SQL editor, paste the `CREATE TABLE`
    blocks from `scripts/init_db.sql` and `scripts/migrate_nwp.sql` /
    `scripts/migrate_ensemble.sql`, omitting the `create_hypertable` lines.
-3. *(Optional)* Create a Storage bucket `meteo-bronze` for raw payloads and model
-   artifacts; grab the S3 credentials (Storage → Settings).
-4. *(Optional)* Enable `pg_cron` if you prefer DB-side scheduling over Vercel Cron.
+3. *(Optional)* Create a Storage bucket `meteo-bronze` for raw payloads; grab the S3
+   credentials (Storage → Settings). Not required — `USE_LOCAL_BRONZE=true` skips it.
 
-## Part 2 — Vercel
+## Part 2 — Vercel (serving)
 
-1. Import the Git repo. Framework preset: **Other**; root is the repo.
-2. Add a `vercel.json` (crons + Python function budgets):
-   ```json
-   {
-     "functions": { "api/**/*.py": { "runtime": "python3.12", "maxDuration": 60 } },
-     "crons": [
-       { "path": "/api/cron/fetch", "schedule": "30 5,11,17,23 * * *" },
-       { "path": "/api/cron/train", "schedule": "0 6 * * *" }
-     ]
-   }
-   ```
-3. Set environment variables (Part 3).
-4. Deploy. The dashboard is served at `/` (FastAPI's `GET /`), the API under `/api/...`.
+1. Import the Git repo. Framework preset: **Other**; root is the repo. `vercel.json` is
+   already in the repo (rewrites all paths to the FastAPI app; no crons).
+2. Set environment variables (Part 3).
+3. Deploy — via the dashboard, or `vercel --prod` from a checkout of your branch. The
+   dashboard is at `/`, the API at `/forecast`, `/eval`, `/best`, etc.
 
-## Part 3 — Environment variables (Vercel project settings)
+## Part 2b — GitHub Actions (the scheduler)
+
+The pipeline runs from `.github/workflows/pipeline.yml` — no setup beyond one secret:
+
+1. Repo → **Settings → Secrets and variables → Actions** → add secret **`DATABASE_URL`**
+   = your Supabase pooler URI (same value as Vercel's).
+2. Enable Actions if prompted. The workflow then runs **fetch+correct every 6h** and
+   **train+champion daily**; you can also trigger it manually (**Actions → pipeline →
+   Run workflow**) to bootstrap immediately.
+
+> GitHub Actions cron is free and 6-hourly — it avoids Vercel Hobby's once-a-day cron
+> limit *and* the function-size limit (the ML stack installs on the runner, not Vercel).
+
+## Part 3 — Environment variables
+
+Set these in **Vercel** (serving) — only `DATABASE_URL` is strictly required there,
+the rest have defaults:
+```
+DATABASE_URL=postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:6543/postgres
+DB_POOL_MIN_SIZE=0
+DB_POOL_MAX_SIZE=1
+```
+The **GitHub Actions** workflow already sets `OPENMETEO_MODELS` (with `gfs_seamless:gfs`),
+`MODEL_STORE=db`, `USE_LOCAL_BRONZE=true`, `NWP_FORECAST_HOURS`, and
+`BIAS_CORRECTION_MIN_SAMPLES` inline — only its `DATABASE_URL` comes from the repo secret.
 
 ```
 DATABASE_URL=postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:6543/postgres
@@ -104,9 +131,9 @@ historical *forecasts*. Bootstrap by:
 - Backfilling **observations** (ground truth) once via the archive — run
   `scripts/backfill_observations.py --days 60` locally against the Supabase
   `DATABASE_URL` (host-runnable, no GRIB).
-- Letting the **fetch cron accumulate model forecasts forward** — the correction
-  needs ~300 (forecast, obs) pairs, reached in a couple of weeks of 6-hourly runs.
-  (Correction/ensemble stay in cold-start passthrough until then — by design.)
+- Letting the **GitHub Actions fetch job accumulate model forecasts forward** — the
+  correction needs ~300 (forecast, obs) pairs, reached in a couple of weeks of
+  6-hourly runs. (Correction/ensemble stay in cold-start passthrough until then.)
 
 ## Part 5 — Verify
 
@@ -116,22 +143,22 @@ curl https://<app>.vercel.app/eval/minsk?hours=336
 curl https://<app>.vercel.app/best/minsk
 # open https://<app>.vercel.app/  for the dashboard
 ```
-Check Vercel → Cron logs that `fetch`/`train` runs return 200.
+Check **GitHub → Actions** that the `pipeline` runs are green (trigger one manually
+first to bootstrap).
 
 ## Part 6 — Limits, caveats, cost
 
-- **Free tiers:** Supabase free (500 MB DB, pauses after ~1 week idle — the crons
-  keep it active) and Vercel Hobby cover a single location comfortably. **Hobby cron
-  runs at most once per day** — `vercel.json` ships with **daily** fetch/train so it
-  deploys on the free tier. For fresher (6-hourly) updates without upgrading, trigger
-  `/cron/fetch` from an **external scheduler** (GitHub Actions cron or cron-job.org)
-  or Supabase `pg_cron` + `pg_net`; both bypass Vercel's cron limit. Or upgrade to
-  Vercel **Pro** and set the schedule back to `30 5,11,17,23 * * *`.
-- **Function duration:** Open-Meteo fetches (~1s) and Ridge training (seconds) fit the
-  60s budget easily. This is *only* possible because there's no GRIB fetch.
-- **LightGBM bundle size:** the bias-correction still uses LightGBM; verify its wheel
-  fits Vercel's function size limit, or switch it to sklearn `HistGradientBoostingRegressor`.
-- **Connections:** always use the Supabase pooler (6543) from serverless; never the
+- **All free:** Supabase free (500 MB DB — the daily job keeps it from pausing),
+  Vercel Hobby (serving only), and GitHub Actions free minutes cover a single location
+  comfortably.
+- **Why the split:** the ML stack (numpy/scipy/sklearn/lightgbm) is ~600 MB — it blows
+  past Vercel's function-size limit. Keeping it on GitHub Actions (no size limit, free
+  6-hourly cron) is what makes the whole thing fit the free tiers. Vercel's bundle is
+  just fastapi + psycopg + a few small libs.
+- **GitHub Actions caveats:** scheduled runs can start a few minutes late, and the
+  workflow auto-disables after ~60 days of *zero repo activity* (a commit or a manual
+  run re-arms it).
+- **Connections:** always use the Supabase **pooler (6543)** from Vercel; never the
   direct 5432 (connection exhaustion).
 - **No raw grid:** point forecasts only. If you later need multi-point/spatial GFS,
   that requires the GRIB path on a long-running host (see the container stack).

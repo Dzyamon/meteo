@@ -1,12 +1,9 @@
-# Serverless (Vercel) runtime deps — the lean subset the API + cron jobs import.
-# No prefect / polars / kafka / eccodes / herbie (all container-only), and no
-# boto3 (add it only if USE_LOCAL_BRONZE=false, i.e. writing bronze to S3).
+# Vercel (serving) deps ONLY — the API reads the DB and serves JSON/HTML, so it
+# needs no ML stack. The heavy fetch/train pipeline runs on GitHub Actions
+# (.github/workflows/pipeline.yml), not here, which keeps this bundle tiny and
+# well under Vercel's function-size limit.
 fastapi>=0.115
 psycopg[binary,pool]>=3.2
-httpx>=0.27
 pydantic-settings>=2.6
 pyyaml>=6.0
-numpy>=1.26
-scikit-learn>=1.5
-lightgbm>=4.5
-joblib>=1.4
+httpx>=0.27

@@ -1,0 +1,10 @@
+# Full pipeline deps for the GitHub Actions scheduler (fetch / predict / train).
+# GitHub runners have no bundle-size limit, so the ML stack lives here, not on Vercel.
+httpx>=0.27
+psycopg[binary,pool]>=3.2
+pydantic-settings>=2.6
+pyyaml>=6.0
+numpy>=1.26
+scikit-learn>=1.5
+lightgbm>=4.5
+joblib>=1.4

@@ -1,0 +1,46 @@
+name: pipeline
+
+# Runs the model pipeline against Supabase on a schedule. GitHub-hosted runners
+# have the full ML stack and no bundle-size limit, so the heavy work lives here
+# (Vercel only serves). Set repo secret DATABASE_URL to the Supabase pooler URI.
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # fetch + correct, every 6h
+    - cron: "30 6 * * *"    # retrain + champions, daily
+  workflow_dispatch: {}
+
+concurrency:
+  group: pipeline
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OPENMETEO_MODELS: "ecmwf_aifs025_single:aifs,icon_seamless:icon,gfs_seamless:gfs"
+      MODEL_STORE: db
+      USE_LOCAL_BRONZE: "true"
+      NWP_FORECAST_HOURS: "48"
+      BIAS_CORRECTION_MIN_SAMPLES: "300"
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-pipeline.txt
+
+      - name: Fetch (Open-Meteo gfs/aifs/icon) + apply correction
+        run: |
+          python -m meteo_model.ai_pipeline
+          python -m meteo_model.correct.predict
+
+      - name: Retrain correction + ensemble, re-select champions (daily)
+        if: github.event.schedule == '30 6 * * *' || github.event_name == 'workflow_dispatch'
+        run: |
+          python -m meteo_model.correct.train
+          python -m meteo_model.ensemble.train
+          python -m meteo_model.ensemble.predict
+          python -m meteo_model.champion
