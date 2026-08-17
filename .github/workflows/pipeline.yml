@@ -32,8 +32,9 @@ jobs:
           cache: pip
       - run: pip install -r requirements-pipeline.txt
 
-      - name: Fetch (Open-Meteo gfs/aifs/icon) + apply correction
+      - name: Ingest observations + fetch (gfs/aifs/icon) + apply correction
         run: |
+          python scripts/backfill_observations.py --days 10
           python -m meteo_model.ai_pipeline
           python -m meteo_model.correct.predict
 
