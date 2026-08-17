@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Meteo — model comparison</title>
+<style>
+  :root {
+    color-scheme: light;
+    --plane: #f9f9f7; --surface: #fcfcfb;
+    --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10);
+    --good: #0ca30c;
+    --m-ensemble: #2a78d6; --m-corrected: #eb6834; --m-aifs: #1baf7a; --m-icon: #eda100;
+    --m-ref: #898781; --m-ref2: #b8b6ae;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --plane: #0d0d0d; --surface: #1a1a19;
+      --ink: #fff; --ink2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10);
+      --good: #0ca30c;
+      --m-ensemble: #3987e5; --m-corrected: #d95926; --m-aifs: #199e70; --m-icon: #c98500;
+      --m-ref: #898781; --m-ref2: #6b6a64;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plane: #0d0d0d; --surface: #1a1a19;
+    --ink: #fff; --ink2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10);
+    --m-ensemble: #3987e5; --m-corrected: #d95926; --m-aifs: #199e70; --m-icon: #c98500;
+    --m-ref: #898781; --m-ref2: #6b6a64;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--plane); color: var(--ink);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+    padding: 16px 20px; border-bottom: 1px solid var(--border); background: var(--surface);
+    position: sticky; top: 0; z-index: 5;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+  header .spacer { flex: 1; }
+  select, button {
+    font: inherit; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--axis); border-radius: 8px; padding: 6px 10px; cursor: pointer;
+  }
+  .seg { display: inline-flex; border: 1px solid var(--axis); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; padding: 6px 12px; background: transparent; }
+  .seg button[aria-pressed="true"] { background: var(--m-ensemble); color: #fff; }
+  main { padding: 20px; max-width: 1100px; margin: 0 auto; display: grid; gap: 20px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink2); margin: 0 0 14px; font-weight: 600; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .tile { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--plane); }
+  .tile .lbl { font-size: 12px; color: var(--muted); }
+  .tile .who { font-size: 20px; font-weight: 650; margin: 4px 0 2px; letter-spacing: -.01em; }
+  .tile .mae { font-size: 12px; color: var(--ink2); font-variant-numeric: tabular-nums; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--good); font-weight: 600; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 8px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink2); }
+  .swatch { width: 14px; height: 3px; border-radius: 2px; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .grid-line { stroke: var(--grid); stroke-width: 1; }
+  .axis-line { stroke: var(--axis); stroke-width: 1; }
+  .tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .endlbl { font-size: 11px; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  tr.champ td { font-weight: 650; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+  .muted { color: var(--muted); }
+  .empty { color: var(--muted); padding: 24px 0; text-align: center; }
+  .tip {
+    position: fixed; pointer-events: none; opacity: 0; transition: opacity .08s;
+    background: var(--surface); border: 1px solid var(--axis); border-radius: 8px;
+    padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.14); z-index: 10;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .tip b { font-weight: 650; }
+  @media (max-width: 640px) { header h1 { width: 100%; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Meteo — physics vs AI vs corrected vs ensemble</h1>
+  <div class="spacer"></div>
+  <label class="muted" for="loc">Location</label>
+  <select id="loc"></select>
+  <div class="seg" id="varseg" role="group" aria-label="Variable">
+    <button data-var="temperature_c" aria-pressed="true">Temp</button>
+    <button data-var="wind_speed_ms" aria-pressed="false">Wind</button>
+    <button data-var="precipitation_mm" aria-pressed="false">Precip</button>
+  </div>
+  <div class="seg" id="tzseg" role="group" aria-label="Timezone">
+    <button data-tz="local" aria-pressed="true">Local</button>
+    <button data-tz="UTC" aria-pressed="false">UTC</button>
+  </div>
+  <button id="theme" title="Toggle theme">◐</button>
+  <button id="refresh" title="Reload">↻</button>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Champion model per variable</h2>
+    <div class="tiles" id="tiles"><div class="empty">Loading…</div></div>
+  </section>
+
+  <section class="card">
+    <h2 id="fc-title">Best-available forecast</h2>
+    <div id="fc-sub" class="muted" style="font-size:12px;margin:-8px 0 12px"></div>
+    <div class="legend" id="fc-legend"></div>
+    <div id="fc-chart"><div class="empty">Loading…</div></div>
+  </section>
+
+  <section class="card">
+    <h2 id="lb-title">Accuracy leaderboard — lower MAE is better</h2>
+    <div id="lb-chart"></div>
+    <div style="overflow-x:auto"><table id="lb-table"></table></div>
+  </section>
+</main>
+
+<div class="tip" id="tip"></div>
+
+<script>
+const API = "";
+const VARS = {
+  temperature_c: { label: "Temperature", unit: "°C", evalKey: "temperature" },
+  wind_speed_ms: { label: "Wind speed", unit: "m/s", evalKey: "wind_speed" },
+  precipitation_mm: { label: "Precipitation", unit: "mm", evalKey: "precipitation" },
+};
+// color follows the entity (same everywhere). Stars in color; references in gray.
+const MODELS = [
+  { id: "ensemble",               label: "Ensemble",      color: "var(--m-ensemble)", dashed: false, inLine: true },
+  { id: "gfs_corrected",          label: "GFS corrected", color: "var(--m-corrected)", dashed: false, inLine: true },
+  { id: "aifs_raw",               label: "AIFS (AI)",     color: "var(--m-aifs)",     dashed: false, inLine: true },
+  { id: "icon_raw",               label: "ICON (DWD)",    color: "var(--m-icon)",     dashed: false, inLine: false },
+  { id: "gfs_raw",                label: "GFS raw",       color: "var(--m-ref)",      dashed: true,  inLine: true },
+  { id: "open_meteo_baseline_v0", label: "Open-Meteo",    color: "var(--m-ref2)",     dashed: false, inLine: false },
+];
+const MODEL = Object.fromEntries(MODELS.map(m => [m.id, m]));
+let state = { loc: null, variable: "temperature_c", tz: "local", locTz: "UTC" };
+
+const $ = s => document.querySelector(s);
+const tip = $("#tip");
+async function getJSON(url) { const r = await fetch(API + url); if (!r.ok) return null; return r.json(); }
+function fmt(v, d = 1) { return v == null ? "—" : (+v).toFixed(d); }
+
+// Time display in the selected zone (UTC or the location's IANA zone).
+function tzName() { return state.tz === "local" ? state.locTz : "UTC"; }
+function tzLabel() { return state.tz === "local" ? state.locTz.split("/").pop().replace(/_/g, " ") : "UTC"; }
+function tParts(t) {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: tzName(), hourCycle: "h23", hour: "2-digit", minute: "2-digit", day: "numeric", month: "numeric" }).formatToParts(new Date(t));
+  const g = k => +(p.find(x => x.type === k)?.value);
+  return { h: g("hour") % 24, m: g("minute"), day: g("day"), mon: g("month") };
+}
+function tStamp(t) {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: tzName(), hourCycle: "h23", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(t));
+}
+
+async function init() {
+  const locs = await getJSON("/locations") || [];
+  const sel = $("#loc");
+  sel.innerHTML = locs.map(l => `<option value="${l.id}">${l.name}</option>`).join("");
+  const tzOf = id => (locs.find(l => l.id === id)?.timezone) || "UTC";
+  state.loc = locs[0]?.id;
+  state.locTz = tzOf(state.loc);
+  sel.onchange = () => { state.loc = sel.value; state.locTz = tzOf(sel.value); render(); };
+  $("#refresh").onclick = render;
+  document.querySelectorAll("#tzseg button").forEach(b => b.onclick = () => {
+    document.querySelectorAll("#tzseg button").forEach(x => x.setAttribute("aria-pressed", "false"));
+    b.setAttribute("aria-pressed", "true");
+    state.tz = b.dataset.tz; render();
+  });
+  $("#theme").onclick = () => {
+    const cur = document.documentElement.getAttribute("data-theme");
+    document.documentElement.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+    render();
+  };
+  document.querySelectorAll("#varseg button").forEach(b => b.onclick = () => {
+    document.querySelectorAll("#varseg button").forEach(x => x.setAttribute("aria-pressed", "false"));
+    b.setAttribute("aria-pressed", "true");
+    state.variable = b.dataset.var; render();
+  });
+  render();
+}
+
+async function render() {
+  if (!state.loc) return;
+  const v = VARS[state.variable];
+  $("#fc-title").textContent = `Best-available forecast — ${v.label}`;
+  $("#lb-title").textContent = `Accuracy leaderboard — ${v.label} MAE (lower is better)`;
+  const [champs, evalData, ...series] = await Promise.all([
+    getJSON(`/champions/${state.loc}`),
+    getJSON(`/eval/${state.loc}?hours=336`),
+    ...MODELS.map(m => getJSON(`/predict/${state.loc}?model_version=${m.id}`)),
+  ]);
+  renderTiles(champs);
+  renderForecast(series, champs);
+  renderLeaderboard(evalData);
+}
+
+function renderTiles(champs) {
+  const el = $("#tiles");
+  if (!champs || !champs.champions) { el.innerHTML = `<div class="empty">No champions selected yet — run selection once data has accumulated.</div>`; return; }
+  el.innerHTML = Object.entries(VARS).map(([key, v]) => {
+    const c = champs.champions[key];
+    if (!c) return `<div class="tile"><div class="lbl">${v.label}</div><div class="who muted">—</div></div>`;
+    const m = MODEL[c.model_version] || { label: c.model_version, color: "var(--ink2)" };
+    return `<div class="tile">
+      <div class="lbl">${v.label}</div>
+      <div class="who"><span class="dot" style="background:${m.color}"></span>${m.label}</div>
+      <div class="mae">MAE ${fmt(c.mae, 2)} ${v.unit} · n=${c.n_scored}</div>
+      <div class="badge">✓ champion</div>
+    </div>`;
+  }).join("");
+}
+
+// ---- forecast line chart (future horizons only) ----
+function renderForecast(series, champs) {
+  const key = state.variable, unit = VARS[state.variable].unit;
+  const now = Date.now();
+  const champVer = champs && champs.champions && champs.champions[state.variable]
+    ? champs.champions[state.variable].model_version : null;
+  const lines = [];
+  // Plot the usual set, plus the champion for this variable even if it isn't
+  // normally on the line chart (e.g. the baseline).
+  MODELS.filter(m => m.inLine || m.id === champVer).forEach((m) => {
+    const data = series[MODELS.indexOf(m)];
+    if (!data || !data.predictions) return;
+    const pts = data.predictions
+      .map(p => ({ t: Date.parse(p.valid_time), v: p[key] }))
+      .filter(p => p.v != null && p.t > now)
+      .sort((a, b) => a.t - b.t);
+    if (pts.length) lines.push({ ...m, pts, champion: m.id === champVer });
+  });
+  const legend = $("#fc-legend");
+  legend.innerHTML = lines.map(l =>
+    `<span><span class="swatch" style="background:${l.color};${l.dashed && !l.champion ? "opacity:.6" : ""}"></span>${l.label}${l.champion ? " ★ champion" : ""}</span>`).join("");
+  const host = $("#fc-chart"), sub = $("#fc-sub");
+  if (!lines.length) { sub.textContent = ""; host.innerHTML = `<div class="empty">No forecast data for this variable yet.</div>`; return; }
+  const allPts = lines.flatMap(l => l.pts);
+  const tMin = Math.min(...allPts.map(p => p.t)), tMax = Math.max(...allPts.map(p => p.t));
+  sub.textContent = `${tStamp(tMin)} → ${tStamp(tMax)} · times in ${tzLabel()}`;
+  host.innerHTML = lineChart(lines, unit);
+  wireLineHover(host.querySelector("svg"), lines, unit);
+}
+
+function lineChart(lines, unit) {
+  const W = 1000, H = 340, m = { l: 44, r: 64, t: 14, b: 28 };
+  const all = lines.flatMap(l => l.pts);
+  const tMin = Math.min(...all.map(p => p.t)), tMax = Math.max(...all.map(p => p.t));
+  let vMin = Math.min(...all.map(p => p.v)), vMax = Math.max(...all.map(p => p.v));
+  if (vMin === vMax) { vMin -= 1; vMax += 1; }
+  const pad = (vMax - vMin) * 0.12; vMin -= pad; vMax += pad;
+  const x = t => m.l + (t - tMin) / (tMax - tMin || 1) * (W - m.l - m.r);
+  const y = v => m.t + (1 - (v - vMin) / (vMax - vMin || 1)) * (H - m.t - m.b);
+
+  // y grid + ticks
+  let g = "";
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) {
+    const val = vMin + (vMax - vMin) * i / ticks, yy = y(val);
+    g += `<line class="grid-line" x1="${m.l}" y1="${yy}" x2="${W - m.r}" y2="${yy}"/>`;
+    g += `<text class="tick" x="${m.l - 8}" y="${yy + 4}" text-anchor="end">${val.toFixed(unit === "°C" ? 0 : 1)}</text>`;
+  }
+  // x time ticks — labelled in the selected zone; date shown on the first tick
+  // and whenever the day changes.
+  const span = tMax - tMin, step = span > 24 * 3.6e6 ? 12 * 3.6e6 : 6 * 3.6e6;
+  let prevDay = null;
+  for (let t = Math.ceil(tMin / step) * step; t <= tMax; t += step) {
+    const xx = x(t), p = tParts(t);
+    const lbl = String(p.h).padStart(2, "0") + ":" + String(p.m).padStart(2, "0");
+    const showDate = prevDay === null || p.day !== prevDay;
+    prevDay = p.day;
+    g += `<line class="grid-line" x1="${xx}" y1="${m.t}" x2="${xx}" y2="${H - m.b}" opacity=".5"/>`;
+    g += `<text class="tick" x="${xx}" y="${H - m.b + 16}" text-anchor="middle">${lbl}</text>`;
+    if (showDate) g += `<text class="tick" x="${xx}" y="${H - m.b + 27}" text-anchor="middle" opacity=".8">${p.mon}/${p.day}</text>`;
+  }
+  // paths + end labels
+  let paths = "", labels = "";
+  lines.forEach(l => {
+    const d = l.pts.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
+    const width = l.champion ? 3.5 : 2;
+    const dash = l.dashed && !l.champion ? 'stroke-dasharray="5 4" opacity=".75"' : "";
+    paths += `<path d="${d}" fill="none" stroke="${l.color}" stroke-width="${width}" stroke-linejoin="round" stroke-linecap="round" ${dash}/>`;
+    const last = l.pts[l.pts.length - 1];
+    labels += `<text class="endlbl" x="${x(last.t) + 6}" y="${y(last.v) + 4}" fill="${l.color}"${l.champion ? ' font-weight="700"' : ""}>${last.v.toFixed(1)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Forecast comparison">
+    ${g}<line class="axis-line" x1="${m.l}" y1="${H - m.b}" x2="${W - m.r}" y2="${H - m.b}"/>
+    ${paths}${labels}
+    <line id="fc-cross" x1="0" y1="${m.t}" x2="0" y2="${H - m.b}" stroke="var(--axis)" stroke-width="1" opacity="0"/>
+    <rect id="fc-hit" x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/>
+  </svg>`;
+}
+
+function wireLineHover(svg, lines, unit) {
+  if (!svg) return;
+  const hit = svg.querySelector("#fc-hit"), cross = svg.querySelector("#fc-cross");
+  const all = lines.flatMap(l => l.pts);
+  const tMin = Math.min(...all.map(p => p.t)), tMax = Math.max(...all.map(p => p.t));
+  hit.addEventListener("mousemove", e => {
+    const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+    const px = (e.clientX - r.left) / r.width * vb.width;
+    const t = tMin + (px - 44) / (1000 - 44 - 64) * (tMax - tMin);
+    const d = new Date(Math.round(t / 3.6e6) * 3.6e6);
+    cross.setAttribute("x1", px); cross.setAttribute("x2", px); cross.setAttribute("opacity", ".6");
+    const rows = lines.map(l => {
+      const near = l.pts.reduce((a, b) => Math.abs(b.t - d.getTime()) < Math.abs(a.t - d.getTime()) ? b : a);
+      return `<div><span class="dot" style="background:${l.color}"></span>${l.label}: <b>${near.v.toFixed(1)}</b> ${unit}</div>`;
+    }).join("");
+    tip.innerHTML = `<div class="muted">${tStamp(d.getTime())} ${tzLabel()}</div>${rows}`;
+    tip.style.left = Math.min(e.clientX + 14, innerWidth - 200) + "px";
+    tip.style.top = (e.clientY + 14) + "px"; tip.style.opacity = 1;
+  });
+  hit.addEventListener("mouseleave", () => { tip.style.opacity = 0; cross.setAttribute("opacity", 0); });
+}
+
+// ---- leaderboard bar chart + table ----
+function renderLeaderboard(evalData) {
+  const host = $("#lb-chart"), tbl = $("#lb-table");
+  if (!evalData || !evalData.models) { host.innerHTML = `<div class="empty">No scored forecasts yet.</div>`; tbl.innerHTML = ""; return; }
+  const ek = VARS[state.variable].evalKey, unit = VARS[state.variable].unit;
+  const rows = evalData.models
+    .map(m => ({ id: m.model_version, mae: m[ek]?.mae, rmse: m.temperature?.rmse, n: m[ek]?.n, meta: MODEL[m.model_version] }))
+    .filter(r => r.mae != null)
+    .sort((a, b) => a.mae - b.mae);
+  if (!rows.length) { host.innerHTML = `<div class="empty">No scored forecasts for this variable.</div>`; tbl.innerHTML = ""; return; }
+  const best = rows[0].id;
+
+  const W = 1000, rowH = 34, m = { l: 150, r: 60, t: 6 }, H = m.t + rows.length * rowH + 6;
+  const max = Math.max(...rows.map(r => r.mae));
+  const bw = W - m.l - m.r;
+  let bars = "";
+  rows.forEach((r, i) => {
+    const yy = m.t + i * rowH, w = Math.max(2, r.mae / max * bw), name = r.meta?.label || r.id;
+    const col = r.meta?.color || "var(--m-ensemble)";
+    bars += `<text class="tick" x="${m.l - 10}" y="${yy + rowH / 2 + 4}" text-anchor="end" fill="var(--ink2)">${name}</text>`;
+    bars += `<rect x="${m.l}" y="${yy + 6}" width="${w}" height="${rowH - 14}" rx="4" fill="${col}" data-i="${i}" class="bar"/>`;
+    bars += `<text class="endlbl" x="${m.l + w + 6}" y="${yy + rowH / 2 + 4}" fill="var(--ink2)">${r.mae.toFixed(2)}${r.id === best ? " ★" : ""}</text>`;
+  });
+  host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="MAE by model">${bars}</svg>`;
+  // per-bar hover
+  host.querySelectorAll(".bar").forEach(b => {
+    const r = rows[+b.dataset.i];
+    b.style.cursor = "pointer";
+    b.addEventListener("mousemove", e => {
+      tip.innerHTML = `<b>${r.meta?.label || r.id}</b><div class="muted">${VARS[state.variable].label}</div>MAE <b>${r.mae.toFixed(2)}</b> ${unit} · n=${r.n}`;
+      tip.style.left = Math.min(e.clientX + 14, innerWidth - 180) + "px";
+      tip.style.top = (e.clientY + 14) + "px"; tip.style.opacity = 1;
+    });
+    b.addEventListener("mouseleave", () => tip.style.opacity = 0);
+  });
+
+  // table (relief rule + accessibility)
+  tbl.innerHTML = `<thead><tr><th>Model</th><th>MAE</th><th>RMSE</th><th>Bias</th><th>n</th></tr></thead><tbody>${
+    evalData.models.map(m => {
+      const e = m[ek] || {}; const isBest = m.model_version === best;
+      const meta = MODEL[m.model_version] || { label: m.model_version, color: "var(--ink2)" };
+      return `<tr class="${isBest ? "champ" : ""}"><td><span class="dot" style="background:${meta.color}"></span>${meta.label}${isBest ? ' <span class="badge">★</span>' : ""}</td>`
+        + `<td>${fmt(e.mae, 2)}</td><td>${fmt(e.rmse, 2)}</td><td>${fmt(e.bias, 2)}</td><td>${e.n ?? "—"}</td></tr>`;
+    }).join("")
+  }</tbody>`;
+}
+
+init();
+</script>
+</body>
+</html>

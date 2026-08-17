@@ -1,0 +1,17 @@
+# Approach 3 (model-centric) runner. Runs on Linux so eccodes/cfgrib GRIB
+# decoding is rock-solid and the Windows host never needs the native library.
+FROM python:3.11-slim
+
+# eccodes C library + data tables for GRIB2 decoding (cfgrib backend)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libeccodes0 libeccodes-data \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY config ./config
+COPY scripts ./scripts
+RUN pip install --no-cache-dir -e ".[model]"
+
+CMD ["meteo-model-fetch"]

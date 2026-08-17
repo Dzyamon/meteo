@@ -47,8 +47,9 @@ class OpenMeteoClient:
         params = {
             "latitude": location.latitude,
             "longitude": location.longitude,
-            "timezone": location.timezone,
+            "timezone": "UTC",  # always store true UTC; Location.timezone is display metadata
             "hourly": ",".join(self.HOURLY_VARS),
+            "windspeed_unit": "ms",  # Open-Meteo defaults to km/h; our column is wind_speed_ms
             "past_hours": lookback_hours,
             "forecast_hours": 1,
         }
@@ -62,8 +63,54 @@ class OpenMeteoClient:
         params = {
             "latitude": location.latitude,
             "longitude": location.longitude,
-            "timezone": location.timezone,
+            "timezone": "UTC",  # always store true UTC; Location.timezone is display metadata
             "hourly": ",".join(self.HOURLY_VARS),
+            "windspeed_unit": "ms",  # Open-Meteo defaults to km/h; our column is wind_speed_ms
+            "forecast_hours": forecast_hours,
+        }
+        response = self._client.get(self.FORECAST_URL, params=params)
+        response.raise_for_status()
+        return response.json()
+
+    def fetch_archive(
+        self,
+        location: Location,
+        start_date: str,
+        end_date: str,
+    ) -> tuple[dict, list[ObservationRow]]:
+        """Historical hourly observations (ERA5 reanalysis) for a date range.
+
+        Dates are ISO 'YYYY-MM-DD'. Used to backfill `observations` so Approach 3
+        bias correction has enough nwp<->obs pairs to train.
+        """
+        params = {
+            "latitude": location.latitude,
+            "longitude": location.longitude,
+            "timezone": "UTC",  # always store true UTC; Location.timezone is display metadata
+            "hourly": ",".join(self.HOURLY_VARS),
+            "windspeed_unit": "ms",  # Open-Meteo defaults to km/h; our column is wind_speed_ms
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+        response = self._client.get(self.ARCHIVE_URL, params=params)
+        response.raise_for_status()
+        payload = response.json()
+        rows = self._parse_hourly(payload, location.id, "open_meteo")
+        return payload, rows
+
+    def fetch_model_forecast(self, location: Location, model: str, forecast_hours: int = 48) -> dict:
+        """Raw hourly forecast from a specific Open-Meteo model (e.g. 'ecmwf_aifs025_single').
+
+        Returns the payload; times are UTC. Used to pull AI/physics model forecasts
+        as additional model_versions for comparison.
+        """
+        params = {
+            "latitude": location.latitude,
+            "longitude": location.longitude,
+            "timezone": "UTC",
+            "hourly": ",".join(self.HOURLY_VARS),
+            "windspeed_unit": "ms",
+            "models": model,
             "forecast_hours": forecast_hours,
         }
         response = self._client.get(self.FORECAST_URL, params=params)

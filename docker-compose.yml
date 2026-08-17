@@ -1,6 +1,7 @@
 services:
   timescaledb:
     image: timescale/timescaledb:latest-pg16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: meteo
       POSTGRES_PASSWORD: meteo
@@ -18,6 +19,7 @@ services:
 
   minio:
     image: minio/minio:latest
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -46,6 +48,7 @@ services:
 
   prefect-server:
     image: prefecthq/prefect:3-latest
+    restart: unless-stopped
     command: prefect server start --host 0.0.0.0
     ports:
       - "4200:4200"
@@ -55,6 +58,24 @@ services:
       PREFECT_UI_API_URL: http://localhost:4200/api
     volumes:
       - prefect_data:/root/.prefect
+
+  # FastAPI serving layer + dashboard (http://localhost:8000). Reads the DB only,
+  # so no MinIO/GRIB deps. restart: unless-stopped -> survives reboots like the rest.
+  meteo-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: meteo-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://meteo:meteo@timescaledb:5432/meteo
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      timescaledb:
+        condition: service_healthy
 
 volumes:
   timescale_data:

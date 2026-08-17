@@ -2,10 +2,67 @@ name: meteo
 prefect-version: 3.0.0
 
 deployments:
-  - name: meteo-every-10min
+  # Approach 1 observation ingest — now on model-pool (same containerized worker),
+  # every 6h. 48h lookback per call means no gaps between runs. Runs before the
+  # GFS/AIFS fetches so fresh ground truth is present for the daily train.
+  - name: obs-ingest-6h
     entrypoint: src/meteo/flows/ingest.py:meteo_micro_batch_flow
     work_pool:
-      name: default-agent-pool
+      name: model-pool
+    pull:
+      - prefect.deployments.steps.set_working_directory:
+          directory: /app
     schedules:
-      - cron: "*/10 * * * *"
+      - cron: "0 5,11,17,23 * * *"
+        timezone: UTC
+
+  # Approach 3 (model-centric) — run on model-pool, served by the containerized
+  # worker (Dockerfile.model) that has GRIB tooling + LightGBM. GFS publishes
+  # ~4-5h after each 00/06/12/18Z cycle, so fetch shortly after.
+  # Code is baked into the model image at /app; override the default pull step
+  # (which would point at the host deploy-time path) so the Linux worker cd's there.
+  - name: gfs-fetch-6h
+    entrypoint: src/meteo_model/flows.py:meteo_model_flow
+    work_pool:
+      name: model-pool
+    pull:
+      - prefect.deployments.steps.set_working_directory:
+          directory: /app
+    schedules:
+      - cron: "30 5,11,17,23 * * *"
+        timezone: UTC
+
+  - name: aifs-fetch-6h
+    entrypoint: src/meteo_model/flows.py:aifs_flow
+    work_pool:
+      name: model-pool
+    pull:
+      - prefect.deployments.steps.set_working_directory:
+          directory: /app
+    schedules:
+      - cron: "35 5,11,17,23 * * *"
+        timezone: UTC
+
+  - name: model-train-daily
+    entrypoint: src/meteo_model/flows.py:train_flow
+    work_pool:
+      name: model-pool
+    pull:
+      - prefect.deployments.steps.set_working_directory:
+          directory: /app
+    schedules:
+      - cron: "0 6 * * *"
+        timezone: UTC
+
+  # After the correction retrain, stack the members into an ensemble and
+  # re-pick the champion model per (location, variable).
+  - name: ensemble-daily
+    entrypoint: src/meteo_model/flows.py:ensemble_flow
+    work_pool:
+      name: model-pool
+    pull:
+      - prefect.deployments.steps.set_working_directory:
+          directory: /app
+    schedules:
+      - cron: "20 6 * * *"
         timezone: UTC

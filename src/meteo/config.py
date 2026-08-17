@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     database_url: str = "postgresql://meteo:meteo@localhost:5432/meteo"
+    # Connection-pool sizing. Serverless (Vercel + Supabase pooler) wants tiny,
+    # short-lived pools: DB_POOL_MIN_SIZE=0, DB_POOL_MAX_SIZE=1.
+    db_pool_min_size: int = 1
+    db_pool_max_size: int = 5
+    # Where trained models live: "disk" (container, MODEL_DIR) or "db" (a bytea
+    # table — the serverless-safe option, since serverless disk is ephemeral).
+    model_store: str = "disk"
+    # Shared secret Vercel Cron sends as `Authorization: Bearer <secret>`.
+    cron_secret: str = ""
     minio_endpoint: str = "http://localhost:9000"
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"
@@ -30,6 +39,27 @@ class Settings(BaseSettings):
     locations_config: Path = Path("config/locations.yaml")
     ingest_lookback_hours: int = 48
     forecast_hours: int = 6
+    kafka_bootstrap_servers: str = "localhost:19092"
+    kafka_topic_observations: str = "weather.observations"
+    kafka_consumer_group: str = "meteo-stream-consumer"
+    kafka_consumer_group_alerts: str = "meteo-stream-alerter"
+    kafka_topic_alerts: str = "weather.alerts"
+    producer_poll_interval_seconds: int = 600
+    alerts_config: Path = Path("config/alerts.yaml")
+    alert_cooldown_seconds: int = 1800
+    alert_webhook_url: str = ""
+    # Approach 3 (model-centric)
+    gfs_s3_bucket: str = "noaa-gfs-bdp-pds"
+    gfs_model: str = "gfs"
+    nwp_forecast_hours: int = 48
+    model_dir: Path = Path("./models")
+    bias_correction_min_samples: int = 300
+    validation_holdout_fraction: float = 0.2  # most-recent share held out for out-of-sample MAE
+    # Extra forecast sources pulled from the Open-Meteo API as additional
+    # model_versions, "<open-meteo-id>:<our-name>" comma-separated. AIFS = ECMWF's
+    # AI model; ICON = DWD physics model. Each becomes nwp_forecasts(<name>) +
+    # predictions(<name>_raw) and an ensemble member.
+    openmeteo_models: str = "ecmwf_aifs025_single:aifs,icon_seamless:icon"
 
 
 @lru_cache
