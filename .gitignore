@@ -15,3 +15,5 @@ build/
 # IDE
 .idea/
 .vscode/
+.env.local
+.vercel
